@@ -35,7 +35,7 @@
     "src/ai/README.md": "de805a96f03a05988d27ea8bcf5d561e56d6ee6e67cdde114bb8b24c208c2454",
     "src/ai/app-authorization.mjs": "f141f0654c5cb2366c6aa9bb85c7fc87f42ea20dfa29756f8bfae6f2e7046c6a",
     "src/ai/connection.mjs": "c94a999d8fda46bfbf6234a00462d1143514a520922285f608c3d6f2dc252a79",
-    "src/ai/credential-vault.mjs": "94a3c22cd2283338f0e1cf1cc58d56709807606da8dd34b26c43a37d51799cf",
+    "src/ai/credential-vault.mjs": "94a3c22cd2283338f0e1cf1cc58d56709807606da8dd34b26c43a37d51799cf2",
     "src/ai/learner-support-contract.mjs": "a5fd67792c31f1cdc575587b893afdaac1139e42f98a0dd99c4b9525461d3240",
     "src/ai/service.mjs": "96537ad8da6b498be7e13e05eb9183301f07de4c40dcac7456f7b5ebf1c564e1",
     "src/ai/vault-service.mjs": "41e1830f319771bceed510edd815b467dbe1d698f01e54e0cc97592cff5427db",
