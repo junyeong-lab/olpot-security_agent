@@ -219,8 +219,9 @@ export function createStudentView() {
       root.appendChild(filters);
       const filterSelect = (title, values, describe) => {
         const label = document.createElement('label');
-        label.textContent = title + ': ';
+        label.textContent = title;
         const select = document.createElement('select');
+        select.setAttribute('aria-label', title);
         const all = document.createElement('option');
         all.value = 'all';
         all.textContent = '전체';
