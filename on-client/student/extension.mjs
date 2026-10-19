@@ -6,17 +6,18 @@ export function createStudentView() {
       // Render a fresh DOM tree for each snapshot; never retain the previous identity.
       const root = document.createElement('div');
       const text = (value) => typeof value === 'string' && value.trim() ? value : '확인 불가';
-      const deviceState = (status) => ({
+      const stateWithCode = (label, status) => `${label} (${text(status)})`;
+      const deviceState = (status) => stateWithCode(({
         compliant: '보안 기준 충족',
         noncompliant: '보안 기준 미충족',
         unknown: '확인 불가',
-      })[status] || '확인 불가';
-      const sessionState = (status) => ({
+      })[status] || '확인 불가', status);
+      const sessionState = (status) => stateWithCode(({
         active: '활성',
         expired: '만료',
         revoked: '철회됨',
         unknown: '확인 불가',
-      })[status] || '확인 불가';
+      })[status] || '확인 불가', status);
 
       const add = (parent, tagName, content) => {
         const node = document.createElement(tagName);
