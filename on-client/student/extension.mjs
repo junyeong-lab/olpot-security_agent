@@ -504,7 +504,140 @@ export function createStudentView() {
       root.appendChild(support);
       return root;
     },
-    renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
+    renderVulnerabilities({ status = 'idle', mode, data, error } = {}) {
+      // The UI is rebuilt for every supplied snapshot; never retain stale package rows.
+      const root = document.createElement('section');
+      const add = (parent, tag, value) => {
+        const node = document.createElement(tag);
+        node.textContent = value;
+        parent.appendChild(node);
+        return node;
+      };
+      const safeMessage = (value) => typeof value === 'string' && value.trim()
+        && value.length <= 500 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)
+        && !/(?:bearer\s+\S+|sk-[A-Za-z0-9_-]{8,}|(?:api[_ -]?key|authorization|token|password|secret|private[_ -]?key|비밀번호|토큰)\s*[:=]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i.test(value)
+        ? value : '안전한 오류 메시지를 확인할 수 없습니다.';
+      const safeCode = (value) => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null;
+      const validTime = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
+      const exactVersion = (value) => typeof value === 'string'
+        && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/.test(value);
+      const scanLabels = {
+        complete: '모두 조회(complete) · 승인된 공개 패키지 조회 완료',
+        partial: '일부 조회 실패(partial) · 확인된 결과만 유지하며 실패 항목도 표시',
+        not_checked: '아직 조회 안 함(not_checked) · 승인된 공개 조회 대상 패키지가 없어 OSV 조회를 수행하지 않음',
+        not_configured: '조회 준비 미완료(not_configured) · 조회 대상 프로젝트 설정 필요',
+        unverifiable: 'lock 파일 확인 불가(unverifiable) · package-lock.json 및 설치 목록을 검증할 수 없음',
+      };
+      const rowLabels = {
+        known_vulnerabilities: '알려진 취약점 있음(known_vulnerabilities)',
+        none_found: '조회한 범위에서 알려진 취약점 없음(none_found) · 패키지나 앱 전체의 안전을 보장하지 않음',
+        unverifiable: '조회 확인 불가(unverifiable) · 취약점 없음으로 판단 금지',
+      };
+      add(root, 'h3', '설치 패키지와 OSV 취약점 조회');
+      if (mode === 'demo') add(root, 'p', '예제 데이터(demo) · 실제 설치 상태 확인 아님');
+      if (status === 'idle') {
+        add(root, 'p', '설치 패키지 조회 전(idle) · 아직 확인된 결과가 없습니다.');
+        add(root, 'p', '조회 전은 취약점 없음이 아닙니다. 제공 화면에서 설치 패키지 조회를 선택하세요.');
+        return root;
+      }
+      if (status === 'loading') {
+        add(root, 'p', '설치 패키지 조회 중(loading) · 현재 요청의 결과를 확인하는 중입니다.');
+        add(root, 'p', '이전 조회 표를 현재 결과로 표시하지 않습니다. 취소·새 요청의 이전 응답은 제공 화면에서 배제됩니다.');
+        return root;
+      }
+      if (status === 'error') {
+        add(root, 'p', '설치 패키지 조회 실패(error) · 현재 조회는 완료되지 않았습니다.');
+        const code = safeCode(error?.code);
+        if (code) add(root, 'p', '오류 코드: ' + code);
+        add(root, 'p', '조회 실패: ' + safeMessage(error?.message));
+        if (code === 'CANCELLED' || code === 'REQUEST_CANCELLED') {
+          add(root, 'p', '조회가 취소됐습니다. 뒤늦은 응답을 현재 결과로 표시하지 않습니다.');
+        }
+        add(root, 'p', '조회 실패는 취약점 없음이나 정상 상태가 아닙니다. 필요하면 제공 화면에서 직접 다시 조회하세요.');
+        return root;
+      }
+      if (status !== 'ok' || !data || !Object.hasOwn(scanLabels, data.status)) {
+        add(root, 'p', '조회 결과 확인 불가 · 응답 형식이나 상태를 확인할 수 없습니다.');
+        return root;
+      }
+
+      add(root, 'p', '전체 조회 상태: ' + scanLabels[data.status]);
+      if (safeCode(data.code)) add(root, 'p', '조회 상태 코드: ' + data.code);
+      if (data.lockfileVersion !== undefined && data.lockfileVersion !== null) {
+        add(root, 'p', '대조 원천: package-lock.json 및 node_modules 설치 메타데이터 · lockfileVersion: ' + String(data.lockfileVersion));
+      }
+      if (typeof data.lockfileHash === 'string' && data.lockfileHash) {
+        add(root, 'p', 'lockfileHash: ' + data.lockfileHash);
+        add(root, 'p', '패키지가 변경되면 다시 조회한 최신 lockfileHash와 결과를 확인하세요.');
+      }
+      if (validTime(data.checkedAt)) add(root, 'p', '전체 조회 시각(checkedAt): ' + data.checkedAt);
+      if (Number.isSafeInteger(data.excluded?.count)) add(root, 'p', '조회 제외: ' + data.excluded.count + '건 · 제외 항목의 취약점 유무는 확인하지 않았습니다.');
+      add(root, 'p', '각 패키지의 버전은 제공 서버가 설치 상태를 대조해 전달한 정확한 설치 버전입니다. ^1.2.0 같은 의존성 범위를 설치 버전으로 바꾸지 않습니다.');
+      add(root, 'p', 'OSV는 알려진 취약점 데이터베이스입니다. 항목이 없거나 조회하지 못한 결과를 패키지·앱 전체의 안전으로 해석하지 않습니다.');
+
+      if (['not_configured', 'not_checked', 'unverifiable'].includes(data.status)) {
+        add(root, 'p', '설정 부족·승인 대상 없음·잠금 파일 확인 실패는 미조회 상태이며 취약점 없음이 아닙니다.');
+        return root;
+      }
+      if (!Array.isArray(data.packages)) {
+        add(root, 'p', '패키지 조회 데이터 확인 불가 · 결과를 정상 목록으로 표시하지 않습니다.');
+        return root;
+      }
+      if (data.packages.length === 0) {
+        add(root, 'p', data.status === 'partial'
+          ? '일부 조회 실패(partial) · 확인된 패키지가 없으며, 취약점이 없다는 뜻은 아닙니다.'
+          : '조회 결과에 표시할 패키지가 없습니다. 패키지나 앱 전체가 안전하다는 뜻은 아닙니다.');
+        return root;
+      }
+      add(root, 'h4', '설치된 정확한 버전별 OSV 조회 결과');
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const head = document.createElement('tr');
+      for (const heading of ['패키지', '정확한 설치 버전', '조회 상태', 'OSV 출처', '패키지 조회 시각', '취약점 ID 및 수정 시각']) {
+        add(head, 'th', heading);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const pkg of data.packages) {
+        const name = typeof pkg?.name === 'string' && pkg.name ? pkg.name : null;
+        const version = exactVersion(pkg?.version) ? pkg.version : null;
+        const row = document.createElement('tr');
+        if (name && version) {
+          row.setAttribute('data-student-package-name', name);
+          row.setAttribute('data-student-package-version', version);
+        }
+        add(row, 'td', name || '패키지 이름 확인 불가');
+        add(row, 'td', version || '정확한 설치 버전 확인 불가 · 범위값을 설치 버전으로 사용하지 않음');
+        const findings = Array.isArray(pkg?.vulnerabilities) ? pkg.vulnerabilities : [];
+        const label = pkg?.status === 'unverifiable' && findings.length > 0
+          ? '일부 확인·전체 조회 확인 불가(unverifiable) · 이미 확인한 취약점 ID는 유지'
+          : (Object.hasOwn(rowLabels, pkg?.status) ? rowLabels[pkg.status] : '패키지 조회 상태 확인 불가');
+        add(row, 'td', label);
+        add(row, 'td', typeof pkg?.source === 'string' && pkg.source ? pkg.source : '출처 확인 불가');
+        add(row, 'td', validTime(pkg?.checkedAt) || '확인 시각 없음');
+        const vulnerabilities = document.createElement('td');
+        if (findings.length > 0) {
+          const ul = document.createElement('ul');
+          for (const item of findings) {
+            const id = typeof item?.id === 'string' && item.id ? item.id : '취약점 ID 확인 불가';
+            add(ul, 'li', '취약점 ID: ' + id + ' · modified: ' + (validTime(item?.modified) || '수정 시각 확인 불가'));
+          }
+          vulnerabilities.appendChild(ul);
+        } else {
+          add(vulnerabilities, 'span', pkg?.status === 'none_found'
+            ? '조회된 범위에서 알려진 항목 없음'
+            : '취약점 조회 결과 확인 불가 · 항목이 없다고 단정할 수 없음');
+        }
+        row.appendChild(vulnerabilities);
+        tbody.appendChild(row);
+      }
+      table.appendChild(tbody);
+      root.appendChild(table);
+      if (data.status === 'partial') add(root, 'p', '부분 조회 결과: 이미 확인한 취약점 ID는 유지하고, 조회에 실패한 패키지는 확인 불가로 남깁니다.');
+      add(root, 'p', '조회·취소는 제공 화면에서만 수행합니다. 학생 코드는 패키지·설정·API 요청을 변경하지 않습니다.');
+      return root;
+    },
     renderAiConnection({ status, mode, data, error, checkedAt, explanationAccepted } = {}) {
       const root = document.createElement('section');
       const line = (tag, value) => {
