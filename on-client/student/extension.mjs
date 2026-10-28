@@ -615,7 +615,7 @@ export function createStudentView({ api, onChange } = {}) {
         box.appendChild(list);
       });
 
-      renderPcDashboard(root, me);
+      // 관제 화면은 별도 전체 너비 학생 상태 영역에서 표시.
       return root;
     },
     renderDecision({ status, mode, data, error, appId } = {}) {
@@ -1043,6 +1043,8 @@ export function createStudentView({ api, onChange } = {}) {
         });
       }
       root.appendChild(support);
+      // 제공 UI를 건드리지 않고 전체 너비 학생 영역에서 관제를 우선 표시.
+      renderPcDashboard(root, { mode });
       return root;
     },
     renderVulnerabilities({ status = 'idle', mode, data, error } = {}) {
