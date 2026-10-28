@@ -1,6 +1,163 @@
 // 이 파일은 학생이 같은 프로젝트에서 이어서 구현합니다.
 // 제공 UI를 받은 것만으로 단계 완료를 인정하지 않습니다.
-export function createStudentView() {
+export function createStudentView({ api, onChange } = {}) {
+  // 개인 관제 대시보드: 읽기 전용 API를 버튼을 누를 때만 조회한다.
+  // 실제 PC 응답만 실측으로 받아들이고, 예시 값·확인 불가·다른 출처를 섞지 않는다.
+  // 이력은 현재 페이지 메모리의 최근 12회만 보관하며 새로고침하면 초기화된다.
+  const pcDashboard = { phase: 'idle', samples: [], message: '' };
+  const readableNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const percent = value => readableNumber(value) && value <= 100 ? value : null;
+  const bytes = value => readableNumber(value) ? (value / 1073741824).toFixed(1) + ' GB' : '확인 불가';
+  const timeText = value => new Date(value).toLocaleString('ko-KR');
+  const localMetric = (data, name) => data?.metrics?.[name]?.state === 'ok' ? data.metrics[name] : null;
+  const readPcSample = response => {
+    if (response?.ok !== true) throw Error('실측 요청 실패 또는 접근 권한 확인 불가');
+    const data = response?.data;
+    const at = data?.measuredAt;
+    const timestamp = typeof at === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(at) ? Date.parse(at) : NaN;
+    if (data?.schema !== 'aleph.on.pc-status.v1' || data?.source !== 'local-pc'
+      || !Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 60000) {
+      throw Error('실측 출처 또는 측정 시각 확인 불가');
+    }
+    const cpu = localMetric(data, 'cpu');
+    const memory = localMetric(data, 'memory');
+    const disk = localMetric(data, 'disk');
+    const events = localMetric(data, 'events');
+    const cpuPercent = percent(cpu?.usagePercent);
+    const memoryValid = readableNumber(memory?.usedBytes) && readableNumber(memory?.totalBytes)
+      && memory.totalBytes > 0 && memory.usedBytes <= memory.totalBytes;
+    const diskValid = readableNumber(disk?.freeBytes) && readableNumber(disk?.totalBytes)
+      && disk.totalBytes > 0 && disk.freeBytes <= disk.totalBytes;
+    const eventsValid = Number.isSafeInteger(events?.warningCount) && events.warningCount >= 0
+      && Number.isSafeInteger(events?.errorCount) && events.errorCount >= 0
+      && events.warningCount + events.errorCount <= 5000 && events.sampleLimit === 5000
+      && typeof events.truncated === 'boolean';
+    if (cpuPercent === null && !memoryValid && !diskValid && !eventsValid) {
+      throw Error('이번 조회에서 확인 가능한 PC 실측 항목이 없습니다');
+    }
+    return Object.freeze({
+      at, cpu: cpuPercent,
+      memoryPercent: memoryValid ? (memory.usedBytes / memory.totalBytes) * 100 : null,
+      memoryUsed: memoryValid ? memory.usedBytes : null,
+      memoryTotal: memoryValid ? memory.totalBytes : null,
+      diskFree: diskValid ? disk.freeBytes : null,
+      diskTotal: diskValid ? disk.totalBytes : null,
+      warnings: eventsValid ? events.warningCount : null,
+      errors: eventsValid ? events.errorCount : null,
+      eventsTruncated: eventsValid ? events.truncated : null,
+    });
+  };
+  const updatePcDashboard = async () => {
+    if (pcDashboard.phase === 'loading') return;
+    pcDashboard.phase = 'loading';
+    pcDashboard.message = '';
+    if (typeof onChange === 'function') onChange();
+    try {
+      if (typeof api?.get !== 'function') throw Error('학생 PC 조회 API 지원 없음');
+      const response = await api.get('/api/pc/status');
+      const sample = readPcSample(response);
+      pcDashboard.samples.push(sample);
+      if (pcDashboard.samples.length > 12) pcDashboard.samples.shift();
+      pcDashboard.phase = 'ok';
+    } catch (error) {
+      pcDashboard.phase = 'error';
+      pcDashboard.message = error instanceof Error ? error.message : '실측 확인 실패';
+    } finally {
+      if (typeof onChange === 'function') onChange();
+    }
+  };
+  const renderPcDashboard = (root, me) => {
+    const el = (parent, tag, value, className) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (value !== undefined) node.textContent = value;
+      parent.appendChild(node);
+      return node;
+    };
+    const section = el(root, 'section');
+    section.setAttribute('data-olpot-dashboard', 'local-pc');
+    el(section, 'h3', 'olpot · 내 PC 관제 대시보드');
+    el(section, 'p', '실측은 이 PC의 읽기 전용 조회 결과입니다. 화면 예시 값은 넣지 않습니다. 확인 불가는 정상·안전·0건이라는 뜻이 아닙니다.');
+    const action = el(section, 'button', pcDashboard.phase === 'loading' ? '실측 조회 중…' : '이 PC 실제 값 조회');
+    action.type = 'button';
+    action.disabled = pcDashboard.phase === 'loading';
+    action.setAttribute('data-olpot-read-pc', 'true');
+    action.addEventListener('click', () => { void updatePcDashboard(); });
+    const last = pcDashboard.phase === 'ok' ? pcDashboard.samples[pcDashboard.samples.length - 1] : null;
+    const source = last ? '실측 · 이 PC · ' + timeText(last.at)
+      : pcDashboard.phase === 'loading' ? '조회 중 · 새 실측 결과 대기'
+      : pcDashboard.phase === 'error' ? '이번 조회 확인 불가 · 이전 측정값을 현재 값으로 쓰지 않음'
+      : '미측정 · 실제 PC 값 없음';
+    el(section, 'p', source).setAttribute('role', 'status');
+    if (pcDashboard.phase === 'error') el(section, 'p', '조회 실패: ' + pcDashboard.message + ' · 직접 다시 눌러 확인하세요.');
+
+    // 기존 grid-2/card 클래스를 재사용하며 제공 파일·스타일·권한을 변경하지 않는다.
+    const grid = el(section, 'div', undefined, 'grid-2');
+    const card = (title, value, detail) => {
+      const box = el(grid, 'section', undefined, 'card student');
+      el(box, 'h4', title);
+      el(box, 'p', last ? value : '확인 불가');
+      el(box, 'p', detail);
+    };
+    const pct = value => value === null ? '확인 불가' : value.toFixed(1) + '%';
+    card('CPU 사용률', last ? pct(last.cpu) : '', '단일 측정 구간 · 출처: 로컬 PC');
+    card('메모리 사용량', last ? pct(last.memoryPercent) : '',
+      last?.memoryUsed !== null && last?.memoryUsed !== undefined
+        ? bytes(last.memoryUsed) + ' / ' + bytes(last.memoryTotal) + ' · 실측'
+        : '실측값 확인 전');
+    card('디스크 여유 공간', last?.diskFree !== null && last?.diskFree !== undefined
+      ? bytes(last.diskFree) : '',
+      last?.diskFree !== null && last?.diskFree !== undefined
+        ? '전체 ' + bytes(last.diskTotal) + ' · 실측'
+        : '실측값 확인 전');
+    card('Windows 경고·오류', last?.warnings !== null && last?.warnings !== undefined
+      ? '경고 ' + last.warnings + '건 · 오류 ' + last.errors + '건' : '',
+      last?.warnings !== null && last?.warnings !== undefined
+        ? '최근 24시간 · 최대 5,000건' + (last.eventsTruncated ? ' · 일부 집계' : '') + ' · 실측'
+        : '실측값 확인 전');
+
+    const trend = el(section, 'section');
+    el(trend, 'h4', 'CPU·메모리 시간별 실측 추이');
+    el(trend, 'p', '최근 12회 수동 측정 · 각 행의 막대는 0~100% 기준 · 페이지 새로고침 시 이력 초기화');
+    if (pcDashboard.samples.length < 2) {
+      el(trend, 'p', '추이 데이터 부족: 서로 다른 실제 측정 결과가 최소 2회 필요합니다. 예시 그래프를 표시하지 않습니다.');
+    } else {
+      const list = el(trend, 'ol');
+      const bars = value => value === null ? '확인 불가' : '█'.repeat(Math.round(value / 10))
+        + '░'.repeat(10 - Math.round(value / 10)) + ' ' + pct(value);
+      for (const sample of pcDashboard.samples) {
+        el(list, 'li', timeText(sample.at) + ' · CPU ' + bars(sample.cpu)
+          + ' · 메모리 ' + bars(sample.memoryPercent) + ' · 실측');
+      }
+    }
+
+    const records = el(section, 'section');
+    el(records, 'h4', '측정 기록·원천 연결 상태');
+    if (last?.warnings !== null && last?.warnings !== undefined) {
+      el(records, 'p', 'Windows System/Application 최근 24시간 집계: 경고 ' + last.warnings
+        + '건 · 오류 ' + last.errors + '건 · ' + timeText(last.at)
+        + (last.eventsTruncated ? ' · 최대 5,000건 일부 집계' : '') + ' · 실제 조회');
+    } else {
+      el(records, 'p', 'Windows 이벤트 집계: 이번 조회 확인 불가. 기록이 0건이라는 의미가 아닙니다.');
+    }
+    const modes = { connected: '연결됨(개별 원천 결과는 별도 확인 필요)',
+      disconnected: '연결 없음', demo: '예제 자료 · 실제 원천 연결 아님',
+      unknown: '확인 불가' };
+    const mode = typeof me?.mode === 'string' && Object.hasOwn(modes, me.mode)
+      ? me.mode : 'unknown';
+    el(records, 'p', '로그인·원천 자료 상태: ' + modes[mode]
+      + ' · 상세 접속·XDR 기록은 「보안 기록」 메뉴에서 별도 조회해 확인하세요.');
+    el(records, 'p', 'Windows 경고·오류 수는 침해 판정이 아닙니다. 조치 집행·AI 사건 설명의 성공 여부를 뜻하지 않습니다.');
+    if (pcDashboard.samples.length) {
+      const list = el(records, 'ul');
+      for (const sample of pcDashboard.samples.slice(-3).reverse()) {
+        el(list, 'li', timeText(sample.at) + ' · CPU ' + pct(sample.cpu)
+          + ' · 메모리 ' + pct(sample.memoryPercent) + ' · 이전 실측 이력');
+      }
+    }
+    root.insertBefore(section, root.firstChild);
+  };
+
   return {
     renderIdentity({ me, devices, sessions }) {
       // Render a fresh DOM tree for each snapshot; never retain the previous identity.
@@ -75,6 +232,7 @@ export function createStudentView() {
         box.appendChild(list);
       });
 
+      renderPcDashboard(root, me);
       return root;
     },
     renderDecision({ status, mode, data, error, appId } = {}) {
