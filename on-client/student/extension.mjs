@@ -172,7 +172,7 @@ export function createStudentView({ api, onChange } = {}) {
       el(header, 'p', '이번 조회 실패 · 이유: ' + pcDashboard.message + ' · 다음 행동: ' + nextStep(pcDashboard.message), 'state state-error');
     }
 
-    // 사용자 구현 4개 카드: SVG는 로컬 실측값의 시각화에만 사용하고, 판단 근거는 HTML에 보존한다.
+    // 사용자 구현 4개 카드: 장식 SVG 없이 상태값을 텍스트로 보여주고, 판단 근거는 HTML에 보존한다.
     const securityGrid = el(section, 'div', undefined, 'grid-2');
     const securityCard = (name, tag) => {
       const card = el(securityGrid, 'section', undefined, 'card student');
@@ -186,49 +186,14 @@ export function createStudentView({ api, onChange } = {}) {
       const why = reason || (pcDashboard.phase === 'error' ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중');
       return '확인 불가 · 이유: ' + why + ' · 다음 행동: ' + nextStep(why);
     };
-    const vectorNode = (parent, tag, properties = {}, text) => {
-      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-      for (const [key, value] of Object.entries(properties)) node.setAttribute(key, String(value));
-      if (text !== undefined) node.textContent = String(text);
-      parent.appendChild(node);
-      return node;
-    };
-    const cardGraphic = (card, kind, value, units, alt) => {
-      if (typeof document.createElementNS !== 'function') return;
-      const themes = {
-        network: ['#286ee0', '#e8f1ff'], firewall: ['#178e83', '#e4f6f1'],
-        records: ['#7164cd', '#f0edff'], sdp: ['#68778b', '#eef1f5'],
-      };
-      const [ink, pale] = themes[kind];
-      const graphic = vectorNode(card, 'svg', {
-        viewBox: '0 0 320 104', width: '100%', height: 104,
-        preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': alt,
-      });
-      vectorNode(graphic, 'title', {}, alt);
-      vectorNode(graphic, 'rect', { x: 1, y: 1, width: 318, height: 102, rx: 17, fill: pale });
-      vectorNode(graphic, 'circle', { cx: 42, cy: 44, r: 28, fill: '#ffffff' });
-      const st = { fill: 'none', stroke: ink, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
-      if (kind === 'network') {
-        vectorNode(graphic, 'path', { d: 'M42 29 L27 53 L57 53 Z', ...st });
-        for (const [x,y] of [[42,29],[27,53],[57,53]]) vectorNode(graphic, 'circle',
-          { cx:x, cy:y, r:5, fill:'#ffffff', stroke:ink, 'stroke-width':3 });
-      } else if (kind === 'firewall') {
-        vectorNode(graphic, 'path', { d:'M42 23 L60 30 V43 C60 55 51 63 42 67 C33 63 24 55 24 43 V30 Z', ...st });
-        vectorNode(graphic, 'path', { d:'M35 45 L41 51 L52 38', ...st });
-      } else if (kind === 'records') {
-        vectorNode(graphic, 'rect', { x:29, y:23, width:29, height:42, rx:4, ...st });
-        vectorNode(graphic, 'path', { d:'M36 34 H51 M36 43 H51 M36 52 H46', ...st });
-      } else {
-        vectorNode(graphic, 'path', { d:'M35 30 L31 34 C27 39 28 43 32 47 M52 48 L55 44 C59 39 58 34 54 30 M39 53 L47 45 M25 62 L62 24', ...st });
-      }
-      vectorNode(graphic, 'text', {
-        x:82, y:49, fill:'#183454', 'font-family':'system-ui, Malgun Gothic, sans-serif',
-        'font-weight':750, 'font-size':value.length>13?17:value.length>9?21:value.length>6?25:30,
-      }, value);
-      vectorNode(graphic, 'text', {
-        x:82, y:74, fill:'#53677f', 'font-family':'system-ui, Malgun Gothic, sans-serif',
-        'font-size':12,
-      }, units);
+    // 장식용 그림 대신 읽기 쉬운 텍스트 상태값을 표시합니다.
+    // 로컬 실측값의 그래프는 아래 별도의 SVG 차트에서 그대로 유지합니다.
+    const cardGraphic = (card, _kind, value, units, alt) => {
+      const metric = el(card, 'div');
+      metric.setAttribute('role', 'group');
+      metric.setAttribute('aria-label', alt);
+      el(metric, 'h2', value);
+      el(metric, 'p', units, 'muted');
     };
     const evidence = (card, text) => {
       const details = el(card, 'details');
