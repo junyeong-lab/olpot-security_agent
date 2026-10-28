@@ -177,7 +177,8 @@ export function createStudentView({ api, onChange } = {}) {
     const securityCard = (name, tag) => {
       const card = el(securityGrid, 'section', undefined, 'card student');
       const head = el(card, 'div', undefined, 'row');
-      el(head, 'h3', name);
+      const heading = el(head, 'h3', name);
+      heading.style.fontSize = '1.1rem';
       el(head, 'span', tag, 'tag');
       return card;
     };
@@ -186,14 +187,27 @@ export function createStudentView({ api, onChange } = {}) {
       const why = reason || (pcDashboard.phase === 'error' ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중');
       return '확인 불가 · 이유: ' + why + ' · 다음 행동: ' + nextStep(why);
     };
-    // 장식용 그림 대신 읽기 쉬운 텍스트 상태값을 표시합니다.
-    // 로컬 실측값의 그래프는 아래 별도의 SVG 차트에서 그대로 유지합니다.
-    const cardGraphic = (card, _kind, value, units, alt) => {
-      const metric = el(card, 'div');
-      metric.setAttribute('role', 'group');
-      metric.setAttribute('aria-label', alt);
-      el(metric, 'h2', value);
-      el(metric, 'p', units, 'muted');
+    // 학생 카드 내부에서만 CSSOM으로 글자 크기를 지정합니다. 제공 CSS·DOM은 바꾸지 않습니다.
+    // 장식 아이콘·컬러 배너 없이 2열 실측 지표와 접근성 있는 HTML 텍스트를 사용합니다.
+    const metricRows = (card, items, description) => {
+      const group = el(card, 'div', undefined, items.length === 2 ? 'grid-2' : undefined);
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', description);
+      group.style.marginTop = '12px';
+      for (const [value, label] of items) {
+        const metric = el(group, 'div');
+        const number = el(metric, 'strong', value);
+        number.style.display = 'block';
+        number.style.fontSize = '2rem';
+        number.style.fontWeight = '750';
+        number.style.lineHeight = '1.25';
+        number.style.overflowWrap = 'anywhere';
+        const caption = el(metric, 'p', label);
+        caption.style.fontSize = '1rem';
+        caption.style.margin = '4px 0 0';
+        caption.style.lineHeight = '1.4';
+        caption.style.color = 'var(--muted)';
+      }
     };
     const evidence = (card, text) => {
       const details = el(card, 'details');
@@ -203,13 +217,13 @@ export function createStudentView({ api, onChange } = {}) {
     const networkCard = securityCard('네트워크 구성',
       last?.networkInterfaces != null ? '로컬 PC 실측' : '측정 대기·확인 불가');
     if (last?.networkInterfaces != null) {
-      cardGraphic(networkCard, 'network', last.networkInterfaces + ' / ' + last.networkIpv4,
-        '인터페이스 / IPv4', '로컬 PC 네트워크 인터페이스 ' + last.networkInterfaces
-        + '개, IPv4 구성 ' + last.networkIpv4 + '개. 인터넷 접속 성공을 의미하지 않음.');
-      el(networkCard, 'p', '네트워크 인터페이스 ' + last.networkInterfaces + '개 · IPv4 구성 ' + last.networkIpv4 + '개', 'item-title');
+      metricRows(networkCard, [
+        [last.networkInterfaces + '개', '네트워크 인터페이스'],
+        [last.networkIpv4 + '개', 'IPv4 구성'],
+      ], '로컬 PC 네트워크 인터페이스와 IPv4 구성 개수. 인터넷 접속 성공을 의미하지 않음.');
       el(networkCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
     } else {
-      cardGraphic(networkCard, 'network', '확인 불가', '네트워크 미측정', '네트워크 구성 확인 불가');
+      metricRows(networkCard, [['확인 불가', '네트워크 미측정']], '네트워크 구성 확인 불가');
       el(networkCard, 'p', unavailable(last?.reasons?.network));
     }
     el(networkCard, 'p', '구성 수치 · 인터넷 접속 성공을 뜻하지 않음', 'muted');
@@ -220,13 +234,16 @@ export function createStudentView({ api, onChange } = {}) {
       last?.firewallProfiles ? '로컬 설정 실측' : '측정 대기·확인 불가');
     if (last?.firewallProfiles) {
       const enabled = last.firewallProfiles.filter(p => p.enabled).length;
-      cardGraphic(firewallCard, 'firewall', enabled + ' / 3 켜짐', 'Domain · Private · Public',
-        '로컬 방화벽 설정: 프로필 3개 중 ' + enabled + '개 켜짐. 전체 보안 안전 판정 아님.');
+      metricRows(firewallCard, [
+        [enabled + '개', '켜진 방화벽 프로필'],
+        [last.firewallProfiles.length + '개', '전체 프로필'],
+      ], '로컬 PC 방화벽 설정. 켜진 프로필 ' + enabled + '개 / 전체 ' + last.firewallProfiles.length
+        + '개. 전체 보안 안전 판정 아님.');
       const badges = el(firewallCard, 'div', undefined, 'row');
       for (const p of last.firewallProfiles) el(badges, 'span', p.name + ' · ' + (p.enabled ? '켜짐' : '꺼짐'), 'tag');
       el(firewallCard, 'p', measuredTime + ' · 로컬 PC 설정 실측', 'muted');
     } else {
-      cardGraphic(firewallCard, 'firewall', '확인 불가', '방화벽 설정 미측정', '방화벽 설정 확인 불가');
+      metricRows(firewallCard, [['확인 불가', '방화벽 설정 미측정']], '방화벽 설정 확인 불가');
       el(firewallCard, 'p', unavailable(last?.reasons?.firewall));
     }
     el(firewallCard, 'p', '설정만 확인 · 안전 판정 아님', 'muted');
@@ -236,13 +253,14 @@ export function createStudentView({ api, onChange } = {}) {
     const windowsCard = securityCard('최근 Windows 기록',
       last?.warnings != null ? 'System · Application' : '측정 대기·확인 불가');
     if (last?.warnings != null) {
-      cardGraphic(windowsCard, 'records', last.warnings + ' / ' + last.errors + '건', '경고 / 오류',
-        '최근 24시간 Windows 기록: 경고 ' + last.warnings + '건, 오류 ' + last.errors + '건. 침해 탐지 결과 아님.');
-      el(windowsCard, 'p', '경고 ' + last.warnings + '건 · 오류 ' + last.errors + '건', 'item-title');
+      metricRows(windowsCard, [
+        [last.warnings + '건', 'Windows 경고'],
+        [last.errors + '건', 'Windows 오류'],
+      ], '최근 24시간 Windows 기록 집계. 침해 탐지 결과 아님.');
       el(windowsCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
       if (last.eventsTruncated) el(windowsCard, 'p', '최대 5,000건까지만 확인한 일부 집계입니다.', 'state state-empty');
     } else {
-      cardGraphic(windowsCard, 'records', '확인 불가', 'Windows 기록 미측정', '경고 및 오류 집계 확인 불가');
+      metricRows(windowsCard, [['확인 불가', 'Windows 기록 미측정']], '경고 및 오류 집계 확인 불가');
       el(windowsCard, 'p', unavailable(last?.reasons?.events));
     }
     el(windowsCard, 'p', '시스템 기록 건수 · 침해 탐지 결과 아님', 'muted');
@@ -258,14 +276,14 @@ export function createStudentView({ api, onChange } = {}) {
     const sdpKnownDisconnected = sdpMode === 'disconnected' || sdpMode === 'demo'
       || (me?.status === 'error' && me?.error?.code === 'ENGINE_NOT_CONNECTED');
     if (sdpKnownDisconnected) {
-      cardGraphic(sdpCard, 'sdp', '미연결', '원천 연결 확인 안 됨', 'SDP 미연결 · PC 실측과 별개');
-      el(sdpCard, 'p', 'SDP 미연결' + (sdpMode === 'demo' ? ' · 예시 자료 모드 (실제 연결 아님)' : ''), 'state state-empty');
+      metricRows(sdpCard, [['미연결', '원천 연결 확인 안 됨']], 'SDP 미연결 · PC 실측과 별개');
+      if (sdpMode === 'demo') el(sdpCard, 'p', '예시 자료 모드 · 실제 연결 아님', 'state state-empty');
     } else if (me?.status === 'loading') {
-      cardGraphic(sdpCard, 'sdp', '확인 중', '연결 결과 대기', 'SDP 연결 확인 중 · 아직 성공 판정 불가');
-      el(sdpCard, 'p', 'SDP 연결 확인 중 · 아직 성공 판정 불가', 'state state-loading');
+      metricRows(sdpCard, [['확인 중', '연결 결과 대기']], 'SDP 연결 확인 중 · 아직 성공 판정 불가');
+      el(sdpCard, 'p', '연결 성공 판정 전', 'state state-loading');
     } else {
-      cardGraphic(sdpCard, 'sdp', '확인 불가', '연결 성공 미검증', 'SDP 연결 확인 불가 · 실제 접속 성공 미검증');
-      el(sdpCard, 'p', 'SDP 연결 확인 불가 · 현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.', 'state state-empty');
+      metricRows(sdpCard, [['확인 불가', '연결 성공 미검증']], 'SDP 연결 확인 불가 · 실제 접속 성공 미검증');
+      el(sdpCard, 'p', '현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.', 'state state-empty');
     }
     el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공', 'muted');
     evidence(sdpCard, ['로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.']);
