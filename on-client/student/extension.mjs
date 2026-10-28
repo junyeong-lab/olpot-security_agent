@@ -82,11 +82,33 @@ export function createStudentView({ api, onChange } = {}) {
       },
     });
   };
+  // 학생 카드가 다시 그려져도 버튼의 키보드 초점은 유지한다.
+  // 조회 중에도 버튼을 포커스 가능한 상태로 두고, 중복 요청은 함수에서 막는다.
+  const publishDashboard = () => {
+    const focused = document.activeElement?.getAttribute?.('data-olpot-read-pc') === 'true';
+    if (typeof onChange === 'function') onChange();
+    if (focused && typeof document.querySelector === 'function') {
+      const next = document.querySelector('[data-olpot-read-pc="true"]');
+      if (typeof next?.focus === 'function') next.focus({ preventScroll: true });
+    }
+  };
+  const nextStep = reason => {
+    if (typeof reason !== 'string') return '다시 조회해 확인하세요. 계속 실패하면 제공 「내 PC 상태」의 결과를 확인하세요.';
+    if (reason.includes('권한') || reason.includes('허용되지')) {
+      return '관리자 권한으로 실행하지 말고, 일반 사용자 계정의 읽기 권한을 담당자에게 확인하세요.';
+    }
+    if (reason.includes('시간 초과')) return '잠시 후 「다시 조회」를 눌러주세요. 계속 실패하면 앱 실행 상태를 확인하세요.';
+    if (reason.includes('운영체제') || reason.includes('지원하지')) return '현재 PC에서 지원되는 조회 항목인지 확인하세요. 설정은 변경하지 마세요.';
+    if (reason.includes('형식') || reason.includes('출처') || reason.includes('시각')) {
+      return '응답 출처·형식·측정 시각을 확인하고 다시 조회하세요. 이전 값을 현재 값으로 사용하지 않습니다.';
+    }
+    return '「다시 조회」로 재확인하고, 계속 실패하면 제공 「내 PC 상태」의 오류 안내를 확인하세요.';
+  };
   const updatePcDashboard = async () => {
     if (pcDashboard.phase === 'loading') return;
     pcDashboard.phase = 'loading';
     pcDashboard.message = '';
-    if (typeof onChange === 'function') onChange();
+    publishDashboard();
     try {
       if (typeof api?.get !== 'function') throw Error('학생 PC 조회 API 지원 없음');
       const response = await api.get('/api/pc/status');
@@ -102,7 +124,7 @@ export function createStudentView({ api, onChange } = {}) {
       pcDashboard.message = error instanceof Error && known.includes(error.message)
         ? error.message : '연결 실패 또는 응답 확인 불가';
     } finally {
-      if (typeof onChange === 'function') onChange();
+      publishDashboard();
     }
   };
   const renderPcDashboard = (root, me) => {
@@ -115,14 +137,15 @@ export function createStudentView({ api, onChange } = {}) {
     };
     const section = el(root, 'section');
     section.setAttribute('data-olpot-dashboard', 'local-pc-comparison');
-    el(section, 'h3', 'olpot · 내 PC 실측 변화 비교');
-    el(section, 'p', '현재 CPU·메모리·디스크 값은 위의 제공 「내 PC 상태」 카드에서 확인합니다. 여기서는 같은 로컬 실측 API를 이용해 이전 측정과 최근 측정의 차이만 설명합니다.');
-    el(section, 'p', '예시 값 없음 · 실제 조회 결과와 조회 시각을 확인한 경우에만 비교합니다. 0이나 정상으로 임의 변환하지 않습니다.');
+    el(section, 'h3', 'olpot · 내 PC 관제');
+    el(section, 'p', '로컬 PC 실측과 SDP 원천 연결은 별도입니다. 읽은 수치에만 출처·시각·단위를 표시하고, 예시 수치는 사용하지 않습니다.');
 
-    const action = el(section, 'button', pcDashboard.phase === 'loading' ? '실측 조회 중…' : '변화 비교용 실측 1회 기록');
+    const action = el(section, 'button', pcDashboard.phase === 'loading' ? '조회 중…' : '다시 조회');
     action.type = 'button';
-    action.disabled = pcDashboard.phase === 'loading';
     action.setAttribute('data-olpot-read-pc', 'true');
+    action.setAttribute('aria-disabled', pcDashboard.phase === 'loading' ? 'true' : 'false');
+    action.setAttribute('aria-busy', pcDashboard.phase === 'loading' ? 'true' : 'false');
+    action.setAttribute('aria-label', '로컬 PC 네트워크·방화벽·기록 및 실측 비교 다시 조회');
     action.addEventListener('click', () => { void updatePcDashboard(); });
     const samples = pcDashboard.samples;
     const last = pcDashboard.phase === 'ok' ? samples[samples.length - 1] : null;
@@ -136,9 +159,8 @@ export function createStudentView({ api, onChange } = {}) {
       : '미측정 · 현재 실측 데이터 없음';
     el(section, 'p', source).setAttribute('role', 'status');
     if (pcDashboard.phase === 'error') {
-      el(section, 'p', '조회할 수 없는 이유: ' + pcDashboard.message + '. 관리자 권한 실행 없이 일반 권한으로만 확인합니다.');
+      el(section, 'p', '이번 조회 실패 · 이유: ' + pcDashboard.message + ' · 다음 행동: ' + nextStep(pcDashboard.message));
     }
-    if (!comparable) el(section, 'p', '변화 비교 전 · 서로 다른 측정 시각의 유효한 실측 결과 2회가 필요합니다.');
 
     // 3일차 관제 상태 카드: 읽기 전용 로컬 측정 3종과 별개의 SDP 연결 근거.
     // 실측이 실패했다면 지난 측정 이력을 현재값으로 승격하지 않는다.
@@ -149,8 +171,10 @@ export function createStudentView({ api, onChange } = {}) {
       return card;
     };
     const measuredTime = last ? ' · 측정 시각 ' + timeText(last.at) : '';
-    const unavailable = reason => '확인 불가 · 이유: ' + (reason || (pcDashboard.phase === 'error'
-      ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중'));
+    const unavailable = reason => {
+      const why = reason || (pcDashboard.phase === 'error' ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중');
+      return '확인 불가 · 이유: ' + why + ' · 다음 행동: ' + nextStep(why);
+    };
     const networkCard = securityCard('네트워크 구성');
     if (last?.networkInterfaces !== null && last?.networkInterfaces !== undefined) {
       el(networkCard, 'p', '네트워크 인터페이스 ' + last.networkInterfaces + '개 · IPv4 구성 '
@@ -196,7 +220,23 @@ export function createStudentView({ api, onChange } = {}) {
       el(sdpCard, 'p', 'SDP 연결 확인 불가 · 현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.');
     }
     el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.');
-    el(section, 'h4', '2일차 · 실측 변화 비교 (유지)');
+    el(section, 'p', '핵심 기능 3가지: ① PC 실측 변화 비교 ② 상태 추이 ③ 기록·실패 근거와 다음 행동');
+    const issues = last ? [
+      ['CPU', last.reasons.cpu], ['메모리', last.reasons.memory], ['디스크', last.reasons.disk],
+      ['네트워크', last.reasons.network], ['Windows 방화벽', last.reasons.firewall],
+      ['Windows 기록', last.reasons.events],
+    ].filter(([_, reason]) => reason !== null && reason !== undefined) : [];
+    if (issues.length) {
+      const notice = el(section, 'section');
+      el(notice, 'h4', '이번 조회에서 실패한 항목 · 다음 행동');
+      const list = el(notice, 'ul');
+      for (const [name, reason] of issues) {
+        el(list, 'li', name + ': 확인 불가 · 이유: ' + reason + ' · 다음 행동: ' + nextStep(reason));
+      }
+    }
+    const compareHeading = el(section, 'h4', '① PC 실측 변화 비교');
+    compareHeading.setAttribute('id', 'olpot-day4-comparison');
+    if (!comparable) el(section, 'p', '비교 대기: 서로 다른 측정 시각의 유효한 실측 결과 2회가 필요합니다. 위 「다시 조회」를 눌러주세요.');
     const grid = el(section, 'div', undefined, 'grid-2');
     const pct = v => v === null ? '확인 불가' : v.toFixed(1) + '%';
     const gb = v => v === null ? '확인 불가' : bytes(v);
@@ -205,7 +245,7 @@ export function createStudentView({ api, onChange } = {}) {
       const card = el(grid, 'section', undefined, 'card student');
       el(card, 'h4', title);
       if (!comparable) {
-        el(card, 'p', '확인 불가 · 유효한 두 시점의 측정 필요');
+        el(card, 'p', '확인 불가 · 유효한 두 시점의 측정 필요 · 다음 행동: 「다시 조회」로 두 번째 실측 기록');
       } else if (a === null || b === null) {
         el(card, 'p', '확인 불가 · ' + (a === null ? '이전: ' + (reasonA ?? '측정되지 않음') : '')
           + (a === null && b === null ? ' / ' : '')
@@ -246,10 +286,11 @@ export function createStudentView({ api, onChange } = {}) {
       + (previous?.eventsTruncated || last?.eventsTruncated ? ' 일부 집계로 전체 증감을 알 수 없습니다.' : ''));
 
     const trend = el(section, 'section');
-    el(trend, 'h4', 'CPU·메모리 실측 추이');
+    const trendHeading = el(trend, 'h4', '② CPU·메모리 실측 추이');
+    trendHeading.setAttribute('id', 'olpot-day4-trend');
     el(trend, 'p', '최근 12회 수동 조회 결과 · 각 값의 단위 % · 새로고침 후 측정 이력 초기화');
     if (samples.length < 2) {
-      el(trend, 'p', '추이 데이터 부족: 실측 결과를 2회 이상 기록해 주세요. 설명용 예시 그래프는 넣지 않습니다.');
+      el(trend, 'p', '추이 데이터 부족: 위 「다시 조회」를 눌러 서로 다른 시각의 실측 결과 2회를 기록하세요. 예시 그래프는 넣지 않습니다.');
     } else {
       const history = el(trend, 'ol');
       for (const sample of samples) {
@@ -261,7 +302,8 @@ export function createStudentView({ api, onChange } = {}) {
       el(trend, 'p', '시점별 변화를 나열한 기록입니다. 실측이 없는 사이의 중간값은 추정하지 않습니다.');
     }
     const records = el(section, 'section');
-    el(records, 'h4', '출처·기록 안내');
+    const recordsHeading = el(records, 'h4', '③ 기록·출처·다음 행동');
+    recordsHeading.setAttribute('id', 'olpot-day4-records');
     el(records, 'p', '측정 출처: /api/pc/status (읽기 전용 로컬 PC API). 원본 데이터는 제공 「내 PC 상태」 기능과 동일한 경로에서 조회하며 설정값을 변경하지 않습니다.');
     const modes = { connected: '연결됨(실제 원천 데이터 별도 확인 필요)',
       disconnected: '연결 없음', demo: '예제 자료 · 실제 연결 아님', unknown: '확인 불가' };
