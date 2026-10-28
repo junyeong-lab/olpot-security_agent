@@ -170,68 +170,138 @@ export function createStudentView({ api, onChange } = {}) {
       el(header, 'p', '이번 조회 실패 · 이유: ' + pcDashboard.message + ' · 다음 행동: ' + nextStep(pcDashboard.message), 'state state-error');
     }
 
-    // 3일차 관제 상태 카드: 읽기 전용 로컬 측정 3종과 별개의 SDP 연결 근거.
-    // 실측이 실패했다면 지난 측정 이력을 현재값으로 승격하지 않는다.
+    // 사용자 구현 4개 카드: SVG는 로컬 실측값의 시각화에만 사용하고, 판단 근거는 HTML에 보존한다.
     const securityGrid = el(section, 'div', undefined, 'grid-2');
-    const securityCard = (title, detail) => {
+    const securityCard = (name, tag) => {
       const card = el(securityGrid, 'section', undefined, 'card student');
       const head = el(card, 'div', undefined, 'row');
-      el(head, 'h3', title);
-      el(head, 'span', detail, 'tag');
+      el(head, 'h3', name);
+      el(head, 'span', tag, 'tag');
       return card;
     };
-    const measuredTime = last ? '측정 시각 ' + timeText(last.at) : '';
+    const measuredTime = last ? '측정 시각 ' + timeText(last.at) : '미측정';
     const unavailable = reason => {
       const why = reason || (pcDashboard.phase === 'error' ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중');
       return '확인 불가 · 이유: ' + why + ' · 다음 행동: ' + nextStep(why);
     };
-    const networkCard = securityCard('네트워크 구성', '로컬 PC 실측');
-    if (last?.networkInterfaces !== null && last?.networkInterfaces !== undefined) {
-      el(networkCard, 'p', '네트워크 인터페이스 ' + last.networkInterfaces + '개 · IPv4 구성 '
-        + last.networkIpv4 + '개', 'item-title');
+    const vectorNode = (parent, tag, properties = {}, text) => {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [key, value] of Object.entries(properties)) node.setAttribute(key, String(value));
+      if (text !== undefined) node.textContent = String(text);
+      parent.appendChild(node);
+      return node;
+    };
+    const cardGraphic = (card, kind, value, units, alt) => {
+      if (typeof document.createElementNS !== 'function') return;
+      const themes = {
+        network: ['#286ee0', '#e8f1ff'], firewall: ['#178e83', '#e4f6f1'],
+        records: ['#7164cd', '#f0edff'], sdp: ['#68778b', '#eef1f5'],
+      };
+      const [ink, pale] = themes[kind];
+      const graphic = vectorNode(card, 'svg', {
+        viewBox: '0 0 320 104', width: '100%', height: 104,
+        preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': alt,
+      });
+      vectorNode(graphic, 'title', {}, alt);
+      vectorNode(graphic, 'rect', { x: 1, y: 1, width: 318, height: 102, rx: 17, fill: pale });
+      vectorNode(graphic, 'circle', { cx: 42, cy: 44, r: 28, fill: '#ffffff' });
+      const st = { fill: 'none', stroke: ink, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+      if (kind === 'network') {
+        vectorNode(graphic, 'path', { d: 'M42 29 L27 53 L57 53 Z', ...st });
+        for (const [x,y] of [[42,29],[27,53],[57,53]]) vectorNode(graphic, 'circle',
+          { cx:x, cy:y, r:5, fill:'#ffffff', stroke:ink, 'stroke-width':3 });
+      } else if (kind === 'firewall') {
+        vectorNode(graphic, 'path', { d:'M42 23 L60 30 V43 C60 55 51 63 42 67 C33 63 24 55 24 43 V30 Z', ...st });
+        vectorNode(graphic, 'path', { d:'M35 45 L41 51 L52 38', ...st });
+      } else if (kind === 'records') {
+        vectorNode(graphic, 'rect', { x:29, y:23, width:29, height:42, rx:4, ...st });
+        vectorNode(graphic, 'path', { d:'M36 34 H51 M36 43 H51 M36 52 H46', ...st });
+      } else {
+        vectorNode(graphic, 'path', { d:'M35 30 L31 34 C27 39 28 43 32 47 M52 48 L55 44 C59 39 58 34 54 30 M39 53 L47 45 M25 62 L62 24', ...st });
+      }
+      vectorNode(graphic, 'text', {
+        x:82, y:49, fill:'#183454', 'font-family':'system-ui, Malgun Gothic, sans-serif',
+        'font-weight':750, 'font-size':value.length>13?17:value.length>9?21:value.length>6?25:30,
+      }, value);
+      vectorNode(graphic, 'text', {
+        x:82, y:74, fill:'#53677f', 'font-family':'system-ui, Malgun Gothic, sans-serif',
+        'font-size':12,
+      }, units);
+    };
+    const evidence = (card, text) => {
+      const details = el(card, 'details');
+      el(details, 'summary', '측정 근거·해석 범위 보기');
+      for (const sentence of text) el(details, 'p', sentence, 'muted');
+    };
+    const networkCard = securityCard('네트워크 구성',
+      last?.networkInterfaces != null ? '로컬 PC 실측' : '측정 대기·확인 불가');
+    if (last?.networkInterfaces != null) {
+      cardGraphic(networkCard, 'network', last.networkInterfaces + ' / ' + last.networkIpv4,
+        '인터페이스 / IPv4', '로컬 PC 네트워크 인터페이스 ' + last.networkInterfaces
+        + '개, IPv4 구성 ' + last.networkIpv4 + '개. 인터넷 접속 성공을 의미하지 않음.');
+      el(networkCard, 'p', '네트워크 인터페이스 ' + last.networkInterfaces + '개 · IPv4 구성 ' + last.networkIpv4 + '개', 'item-title');
       el(networkCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
     } else {
+      cardGraphic(networkCard, 'network', '확인 불가', '네트워크 미측정', '네트워크 구성 확인 불가');
       el(networkCard, 'p', unavailable(last?.reasons?.network));
     }
-    el(networkCard, 'p', '구성 개수만 조회하며 인터넷 접속이나 업무망 접근 허용을 증명하지 않습니다.', 'muted');
+    el(networkCard, 'p', '구성 수치 · 인터넷 접속 성공을 뜻하지 않음', 'muted');
+    evidence(networkCard, ['구성 개수만 조회하며 인터넷 접속이나 업무망 접근 허용을 증명하지 않습니다.',
+      '출처: 읽기 전용 로컬 PC 조회 · ' + measuredTime]);
 
-    const firewallCard = securityCard('Windows 방화벽 설정', '읽기 전용 설정');
+    const firewallCard = securityCard('Windows 방화벽 설정',
+      last?.firewallProfiles ? '로컬 설정 실측' : '측정 대기·확인 불가');
     if (last?.firewallProfiles) {
-      for (const p of last.firewallProfiles) {
-        el(firewallCard, 'p', p.name + ': ' + (p.enabled ? '켜짐' : '꺼짐'), 'item-title');
-      }
+      const enabled = last.firewallProfiles.filter(p => p.enabled).length;
+      cardGraphic(firewallCard, 'firewall', enabled + ' / 3 켜짐', 'Domain · Private · Public',
+        '로컬 방화벽 설정: 프로필 3개 중 ' + enabled + '개 켜짐. 전체 보안 안전 판정 아님.');
+      const badges = el(firewallCard, 'div', undefined, 'row');
+      for (const p of last.firewallProfiles) el(badges, 'span', p.name + ' · ' + (p.enabled ? '켜짐' : '꺼짐'), 'tag');
       el(firewallCard, 'p', measuredTime + ' · 로컬 PC 설정 실측', 'muted');
     } else {
+      cardGraphic(firewallCard, 'firewall', '확인 불가', '방화벽 설정 미측정', '방화벽 설정 확인 불가');
       el(firewallCard, 'p', unavailable(last?.reasons?.firewall));
     }
-    el(firewallCard, 'p', '설정 읽기 전용 · 변경하지 않음 · 켜져 있어도 전체 보안이 안전하다는 뜻이 아닙니다.', 'muted');
+    el(firewallCard, 'p', '설정만 확인 · 안전 판정 아님', 'muted');
+    evidence(firewallCard, ['설정 읽기 전용 · 변경하지 않음 · 켜져 있어도 전체 보안이 안전하다는 뜻이 아닙니다.',
+      '출처: 로컬 방화벽 설정 · ' + measuredTime]);
 
-    const windowsCard = securityCard('최근 Windows 기록', 'System · Application');
-    if (last?.warnings !== null && last?.warnings !== undefined) {
-      el(windowsCard, 'p', '최근 24시간 경고 ' + last.warnings
-        + '건 · 오류 ' + last.errors + '건', 'item-title');
+    const windowsCard = securityCard('최근 Windows 기록',
+      last?.warnings != null ? 'System · Application' : '측정 대기·확인 불가');
+    if (last?.warnings != null) {
+      cardGraphic(windowsCard, 'records', last.warnings + ' / ' + last.errors + '건', '경고 / 오류',
+        '최근 24시간 Windows 기록: 경고 ' + last.warnings + '건, 오류 ' + last.errors + '건. 침해 탐지 결과 아님.');
+      el(windowsCard, 'p', '경고 ' + last.warnings + '건 · 오류 ' + last.errors + '건', 'item-title');
       el(windowsCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
-      if (last.eventsSince) el(windowsCard, 'p', '집계 시작 시각: ' + timeText(last.eventsSince), 'muted');
-      el(windowsCard, 'p', last.eventsTruncated
-        ? '최대 5,000건까지만 집계한 일부 결과. 전체 사건 수가 아닙니다.'
-        : '최대 5,000건까지 확인한 집계 결과입니다.');
+      if (last.eventsTruncated) el(windowsCard, 'p', '최대 5,000건까지만 확인한 일부 집계입니다.', 'state state-empty');
     } else {
+      cardGraphic(windowsCard, 'records', '확인 불가', 'Windows 기록 미측정', '경고 및 오류 집계 확인 불가');
       el(windowsCard, 'p', unavailable(last?.reasons?.events));
     }
-    el(windowsCard, 'p', '경고·오류 건수는 침해나 공격 탐지 결과가 아닙니다. 악성 행위 발생 여부를 판정하지 않습니다.', 'muted');
+    el(windowsCard, 'p', '시스템 기록 건수 · 침해 탐지 결과 아님', 'muted');
+    evidence(windowsCard, [
+      last?.eventsSince ? '집계 시작 시각: ' + timeText(last.eventsSince) : '집계 시작 시각: 확인 불가',
+      last?.eventsTruncated ? '최대 5,000건까지만 집계한 일부 결과. 전체 사건 수가 아닙니다.'
+        : '최대 5,000건까지 확인한 집계 결과입니다.',
+      '경고·오류 건수는 침해나 공격 탐지 결과가 아닙니다. 악성 행위 발생 여부를 판정하지 않습니다.',
+    ]);
 
-    const sdpCard = securityCard('SDP 연결 상태', 'PC 측정과 별개');
+    const sdpCard = securityCard('SDP 연결 상태', '로컬 PC 실측과 별개');
     const sdpMode = me?.mode;
     const sdpKnownDisconnected = sdpMode === 'disconnected' || sdpMode === 'demo'
       || (me?.status === 'error' && me?.error?.code === 'ENGINE_NOT_CONNECTED');
     if (sdpKnownDisconnected) {
+      cardGraphic(sdpCard, 'sdp', '미연결', '원천 연결 확인 안 됨', 'SDP 미연결 · PC 실측과 별개');
       el(sdpCard, 'p', 'SDP 미연결' + (sdpMode === 'demo' ? ' · 예시 자료 모드 (실제 연결 아님)' : ''), 'state state-empty');
     } else if (me?.status === 'loading') {
+      cardGraphic(sdpCard, 'sdp', '확인 중', '연결 결과 대기', 'SDP 연결 확인 중 · 아직 성공 판정 불가');
       el(sdpCard, 'p', 'SDP 연결 확인 중 · 아직 성공 판정 불가', 'state state-loading');
     } else {
+      cardGraphic(sdpCard, 'sdp', '확인 불가', '연결 성공 미검증', 'SDP 연결 확인 불가 · 실제 접속 성공 미검증');
       el(sdpCard, 'p', 'SDP 연결 확인 불가 · 현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.', 'state state-empty');
     }
-    el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.', 'muted');
+    el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공', 'muted');
+    evidence(sdpCard, ['로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.']);
     el(section, 'p', '핵심 기능 3가지 · ① PC 실측 변화 비교  ② CPU·메모리 실측 추이  ③ 기록·출처·다음 행동', 'notice');
     const issues = last ? [
       ['CPU', last.reasons.cpu], ['메모리', last.reasons.memory], ['디스크', last.reasons.disk],
