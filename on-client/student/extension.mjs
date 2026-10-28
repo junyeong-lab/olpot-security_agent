@@ -5,6 +5,8 @@ export function createStudentView({ api, onChange } = {}) {
   // 실제 PC 응답만 실측으로 받아들이고, 예시 값·확인 불가·다른 출처를 섞지 않는다.
   // 이력은 현재 페이지 메모리의 최근 12회만 보관하며 새로고침하면 초기화된다.
   const pcDashboard = { phase: 'idle', samples: [], message: '' };
+  // 학생 신원 상세 정보의 접기 상태는 리렌더링 중에도 유지합니다.
+  let identityDetailsOpen = false;
   const readableNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const percent = value => readableNumber(value) && value <= 100 ? value : null;
   const bytes = value => readableNumber(value) ? (value / 1073741824).toFixed(1) + ' GB' : '확인 불가';
@@ -545,6 +547,21 @@ export function createStudentView({ api, onChange } = {}) {
     renderIdentity({ me, devices, sessions }) {
       // Render a fresh DOM tree for each snapshot; never retain the previous identity.
       const root = document.createElement('div');
+      // 두 제공/학생 신원 카드의 동일 행 높이를 줄이기 위해 학생 상세만 접습니다.
+      // 제공 카드의 DOM, CSS, 원본 API 응답은 변경하지 않습니다.
+      const details = document.createElement('details');
+      details.open = identityDetailsOpen;
+      const visibleState = me?.status === 'loading' ? '불러오는 중'
+        : me?.mode === 'disconnected' ? '연결 없음 (disconnected)'
+        : me?.mode === 'demo' ? '예제 자료 (demo)'
+        : me?.mode === 'connected' ? '연결 모드 (connected)'
+        : me?.status === 'error' ? '연결 실패'
+        : '확인 불가';
+      const label = document.createElement('summary');
+      label.textContent = '계정·기기·세션 상세 보기 · ' + visibleState;
+      details.appendChild(label);
+      details.addEventListener('toggle', () => { identityDetailsOpen = details.open; });
+      root.appendChild(details);
       const text = (value) => typeof value === 'string' && value.trim() ? value : '확인 불가';
       const stateWithCode = (label, status) => `${label} (${text(status)})`;
       const deviceState = (status) => stateWithCode(({
@@ -583,7 +600,7 @@ export function createStudentView({ api, onChange } = {}) {
         } else {
           add(box, 'p', '확인 불가');
         }
-        root.appendChild(box);
+        details.appendChild(box);
       };
 
       section('현재 계정·기기·세션', me, (box, data) => {
