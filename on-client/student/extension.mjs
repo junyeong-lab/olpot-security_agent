@@ -387,7 +387,8 @@ export function createStudentView({ api, onChange } = {}) {
         el(card, 'p', '변화 ' + delta(diff, unit, places), 'item-title');
       }
       if (graphValue && comparable && a !== null && b !== null) {
-        appendComparisonChart(card, title, graphValue(a), graphValue(b), graphUnit, graphColor, formatter);
+        appendComparisonChart(card, title, graphValue(a), graphValue(b), graphUnit, graphColor,
+          value => graphUnit === 'GB' ? value.toFixed(1) + ' GB' : formatter(value));
       }
       if (previous && last) {
         el(card, 'p', '이전 실측 ' + timeText(previous.at) + ' · ' + (a === null ? '확인 불가 (' + reasonA + ')' : formatter(a)), 'muted');
