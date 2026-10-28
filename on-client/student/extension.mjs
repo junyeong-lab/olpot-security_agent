@@ -110,7 +110,8 @@ export function createStudentView({ api, onChange } = {}) {
     const last = pcDashboard.phase === 'ok' ? samples[samples.length - 1] : null;
     const previous = last && samples.length >= 2 ? samples[samples.length - 2] : null;
     const comparable = previous && Date.parse(last.at) > Date.parse(previous.at);
-    const source = last ? '실측 완료 · 이 PC · 최근 측정 ' + timeText(last.at)
+    const source = last ? (last.cpu === null && last.memoryPercent === null && last.diskFree === null && last.warnings === null
+      ? '로컬 응답 확인 · 모든 측정값 확인 불가 · 확인 시각 ' : '일부 또는 전체 항목 실측 확인 · 이 PC · 최근 측정 ') + timeText(last.at)
       : pcDashboard.phase === 'loading' ? '실측 조회 중 · 현재값 대기'
       : pcDashboard.phase === 'error' ? '이번 조회 확인 불가 · 이전 이력은 현재값이 아님'
       : '미측정 · 현재 실측 데이터 없음';
@@ -165,7 +166,8 @@ export function createStudentView({ api, onChange } = {}) {
       el(eventsBox, 'p', '최근 실측 ' + timeText(last.at) + ' · '
         + (last.warnings === null ? '확인 불가 (' + last.reasons.events + ')' : '경고 ' + last.warnings + '건 · 오류 ' + last.errors + '건'));
     }
-    el(eventsBox, 'p', '최근 24시간 집계의 시점별 차이일 뿐 신규 위협 건수가 아닙니다. 최대 5,000건만 읽으므로 일부 집계일 수 있습니다.');
+    el(eventsBox, 'p', '최근 24시간 집계의 시점별 차이일 뿐 신규 위협 건수가 아닙니다. 최대 5,000건만 읽습니다.'
+      + (previous?.eventsTruncated || last?.eventsTruncated ? ' 일부 집계로 전체 증감을 알 수 없습니다.' : ''));
 
     const trend = el(section, 'section');
     el(trend, 'h4', 'CPU·메모리 실측 추이');
