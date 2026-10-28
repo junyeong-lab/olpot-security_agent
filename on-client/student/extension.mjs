@@ -1,10 +1,550 @@
 // 이 파일은 학생이 같은 프로젝트에서 이어서 구현합니다.
 // 제공 UI를 받은 것만으로 단계 완료를 인정하지 않습니다.
-export function createStudentView() {
+export function createStudentView({ api, onChange } = {}) {
+  // 개인 관제 대시보드: 읽기 전용 API를 버튼을 누를 때만 조회한다.
+  // 실제 PC 응답만 실측으로 받아들이고, 예시 값·확인 불가·다른 출처를 섞지 않는다.
+  // 이력은 현재 페이지 메모리의 최근 12회만 보관하며 새로고침하면 초기화된다.
+  const pcDashboard = { phase: 'idle', samples: [], message: '' };
+  // 학생 신원 상세 정보의 접기 상태는 리렌더링 중에도 유지합니다.
+  let identityDetailsOpen = false;
+  const readableNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const percent = value => readableNumber(value) && value <= 100 ? value : null;
+  const bytes = value => readableNumber(value) ? (value / 1073741824).toFixed(1) + ' GB' : '확인 불가';
+  const timeText = value => new Date(value).toLocaleString('ko-KR');
+  const knownReason = {
+    permission_denied: '일반 사용자 권한으로 읽을 수 없음',
+    unsupported: '현재 운영체제에서 지원하지 않음',
+    timeout: '조회 시간 초과',
+  };
+  const missingReason = metric => metric?.state !== 'ok'
+    ? (knownReason[metric?.reason] ?? '항목 조회 실패 또는 응답 없음')
+    : '측정값 형식 확인 불가';
+  const localMetric = (data, name) => data?.metrics?.[name]?.state === 'ok' ? data.metrics[name] : null;
+  const readPcSample = response => {
+    if (response?.ok !== true) {
+      const code = response?.error?.code;
+      throw Error(code === 'NOT_ALLOWED' ? '학생 API 접근이 허용되지 않음'
+        : code === 'REQUEST_TIMEOUT' || code === 'TIMEOUT' ? '요청 시간 초과'
+        : code === 'PERMISSION_DENIED' ? '일반 사용자 권한으로 읽을 수 없음'
+        : '실측 요청 실패 또는 응답 형식 확인 불가');
+    }
+    const data = response?.data;
+    const at = data?.measuredAt;
+    const timestamp = typeof at === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(at) ? Date.parse(at) : NaN;
+    if (data?.schema !== 'aleph.on.pc-status.v1' || data?.source !== 'local-pc'
+      || !Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 60000) {
+      throw Error('실측 출처 또는 측정 시각 확인 불가');
+    }
+    const cpu = localMetric(data, 'cpu');
+    const memory = localMetric(data, 'memory');
+    const disk = localMetric(data, 'disk');
+    const events = localMetric(data, 'events');
+    const network = localMetric(data, 'network');
+    const firewall = localMetric(data, 'firewall');
+    const networkValid = Number.isSafeInteger(network?.interfaceCount) && network.interfaceCount >= 0
+      && Number.isSafeInteger(network?.ipv4Count) && network.ipv4Count >= 0;
+    const profileNames = ['Domain', 'Private', 'Public'];
+    const firewallValid = Array.isArray(firewall?.profiles) && firewall.profiles.length === 3
+      && profileNames.every(name => firewall.profiles.filter(p => p?.name === name && typeof p.enabled === 'boolean').length === 1);
+    const windowSince = typeof events?.since === 'string' && Number.isFinite(Date.parse(events.since))
+      ? events.since : null;
+    const cpuPercent = percent(cpu?.usagePercent);
+    const memoryValid = readableNumber(memory?.usedBytes) && readableNumber(memory?.totalBytes)
+      && memory.totalBytes > 0 && memory.usedBytes <= memory.totalBytes;
+    const diskValid = readableNumber(disk?.freeBytes) && readableNumber(disk?.totalBytes)
+      && disk.totalBytes > 0 && disk.freeBytes <= disk.totalBytes;
+    const eventsValid = Number.isSafeInteger(events?.warningCount) && events.warningCount >= 0
+      && Number.isSafeInteger(events?.errorCount) && events.errorCount >= 0
+      && events.warningCount + events.errorCount <= 5000 && events.sampleLimit === 5000
+      && typeof events.truncated === 'boolean';
+    return Object.freeze({
+      at, cpu: cpuPercent,
+      memoryPercent: memoryValid ? (memory.usedBytes / memory.totalBytes) * 100 : null,
+      memoryUsed: memoryValid ? memory.usedBytes : null,
+      memoryTotal: memoryValid ? memory.totalBytes : null,
+      diskFree: diskValid ? disk.freeBytes : null,
+      diskTotal: diskValid ? disk.totalBytes : null,
+      warnings: eventsValid ? events.warningCount : null,
+      errors: eventsValid ? events.errorCount : null,
+      eventsTruncated: eventsValid ? events.truncated : null,
+      eventsSince: eventsValid ? windowSince : null,
+      networkInterfaces: networkValid ? network.interfaceCount : null,
+      networkIpv4: networkValid ? network.ipv4Count : null,
+      firewallProfiles: firewallValid
+        ? Object.freeze(profileNames.map(name => Object.freeze({
+          name, enabled: firewall.profiles.find(p => p.name === name).enabled,
+        }))) : null,
+      reasons: {
+        cpu: cpuPercent === null ? missingReason(data?.metrics?.cpu) : null,
+        memory: !memoryValid ? missingReason(data?.metrics?.memory) : null,
+        disk: !diskValid ? missingReason(data?.metrics?.disk) : null,
+        events: !eventsValid ? missingReason(data?.metrics?.events) : null,
+        network: !networkValid ? missingReason(data?.metrics?.network) : null,
+        firewall: !firewallValid ? missingReason(data?.metrics?.firewall) : null,
+      },
+    });
+  };
+  // 학생 카드가 다시 그려져도 버튼의 키보드 초점은 유지한다.
+  // 조회 중에도 버튼을 포커스 가능한 상태로 두고, 중복 요청은 함수에서 막는다.
+  const publishDashboard = () => {
+    const focused = document.activeElement?.getAttribute?.('data-olpot-read-pc') === 'true';
+    if (typeof onChange === 'function') onChange();
+    if (focused && typeof document.querySelector === 'function') {
+      const next = document.querySelector('[data-olpot-read-pc="true"]');
+      if (typeof next?.focus === 'function') next.focus({ preventScroll: true });
+    }
+  };
+  const nextStep = reason => {
+    if (typeof reason !== 'string') return '다시 조회해 확인하세요. 계속 실패하면 제공 「내 PC 상태」의 결과를 확인하세요.';
+    if (reason.includes('권한') || reason.includes('허용되지')) {
+      return '관리자 권한으로 실행하지 말고, 일반 사용자 계정의 읽기 권한을 담당자에게 확인하세요.';
+    }
+    if (reason.includes('시간 초과')) return '잠시 후 「다시 조회」를 눌러주세요. 계속 실패하면 앱 실행 상태를 확인하세요.';
+    if (reason.includes('운영체제') || reason.includes('지원하지')) return '현재 PC에서 지원되는 조회 항목인지 확인하세요. 설정은 변경하지 마세요.';
+    if (reason.includes('형식') || reason.includes('출처') || reason.includes('시각')) {
+      return '응답 출처·형식·측정 시각을 확인하고 다시 조회하세요. 이전 값을 현재 값으로 사용하지 않습니다.';
+    }
+    return '「다시 조회」로 재확인하고, 계속 실패하면 제공 「내 PC 상태」의 오류 안내를 확인하세요.';
+  };
+  const updatePcDashboard = async () => {
+    if (pcDashboard.phase === 'loading') return;
+    pcDashboard.phase = 'loading';
+    pcDashboard.message = '';
+    publishDashboard();
+    try {
+      if (typeof api?.get !== 'function') throw Error('학생 PC 조회 API 지원 없음');
+      const response = await api.get('/api/pc/status');
+      const sample = readPcSample(response);
+      pcDashboard.samples.push(sample);
+      if (pcDashboard.samples.length > 12) pcDashboard.samples.shift();
+      pcDashboard.phase = 'ok';
+    } catch (error) {
+      pcDashboard.phase = 'error';
+      const known = ['학생 API 접근이 허용되지 않음', '요청 시간 초과', '일반 사용자 권한으로 읽을 수 없음',
+        '실측 요청 실패 또는 응답 형식 확인 불가', '실측 출처 또는 측정 시각 확인 불가',
+        '학생 PC 조회 API 지원 없음'];
+      pcDashboard.message = error instanceof Error && known.includes(error.message)
+        ? error.message : '연결 실패 또는 응답 확인 불가';
+    } finally {
+      publishDashboard();
+    }
+  };
+  const renderPcDashboard = (root, me) => {
+    const el = (parent, tag, value, className) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (value !== undefined) node.textContent = value;
+      parent.appendChild(node);
+      return node;
+    };
+    const section = el(root, 'section');
+    section.setAttribute('data-olpot-dashboard', 'local-pc-comparison');
+    section.setAttribute('aria-label', 'olpot 로컬 PC 관제 대시보드');
+    // 기존 공통 CSS의 카드·행·태그를 재사용한다. inline style과 제공 UI 수정을 하지 않는다.
+    const header = el(section, 'header', undefined, 'card');
+    const titleRow = el(header, 'div', undefined, 'row');
+    el(titleRow, 'h3', 'olpot · 내 PC 관제');
+    el(titleRow, 'span', 'LOCAL PC · 읽기 전용', 'tag tag-student');
+    el(header, 'p', '로컬 PC 실측과 SDP 원천 연결은 별도입니다. 실제로 읽은 수치에만 출처·시각·단위를 표시합니다.', 'muted');
+
+    const controls = el(header, 'div', undefined, 'row');
+    const action = el(controls, 'button', pcDashboard.phase === 'loading' ? '조회 중…' : '다시 조회', 'btn');
+    action.type = 'button';
+    action.setAttribute('data-olpot-read-pc', 'true');
+    action.setAttribute('aria-disabled', pcDashboard.phase === 'loading' ? 'true' : 'false');
+    action.setAttribute('aria-busy', pcDashboard.phase === 'loading' ? 'true' : 'false');
+    action.setAttribute('aria-label', '로컬 PC 네트워크·방화벽·기록 및 실측 비교 다시 조회');
+    action.addEventListener('click', () => { void updatePcDashboard(); });
+    const samples = pcDashboard.samples;
+    const last = pcDashboard.phase === 'ok' ? samples[samples.length - 1] : null;
+    const previous = last && samples.length >= 2 ? samples[samples.length - 2] : null;
+    const comparable = previous && Date.parse(last.at) > Date.parse(previous.at);
+    const source = last ? (last.cpu === null && last.memoryPercent === null && last.diskFree === null
+      && last.warnings === null && last.networkInterfaces === null && last.firewallProfiles === null
+      ? '로컬 응답 확인 · 모든 측정값 확인 불가 · 확인 시각 ' : '일부 또는 전체 항목 실측 확인 · 이 PC · 최근 측정 ') + timeText(last.at)
+      : pcDashboard.phase === 'loading' ? '실측 조회 중 · 현재값 대기'
+      : pcDashboard.phase === 'error' ? '이번 조회 확인 불가 · 이전 이력은 현재값이 아님'
+      : '미측정 · 현재 실측 데이터 없음';
+    el(header, 'p', source, pcDashboard.phase === 'loading' ? 'state state-loading'
+      : pcDashboard.phase === 'error' ? 'state state-error'
+      : pcDashboard.phase === 'idle' ? 'state state-empty' : 'state').setAttribute('role', 'status');
+    if (pcDashboard.phase === 'error') {
+      el(header, 'p', '이번 조회 실패 · 이유: ' + pcDashboard.message + ' · 다음 행동: ' + nextStep(pcDashboard.message), 'state state-error');
+    }
+
+    // 사용자 구현 4개 카드: 장식 SVG 없이 상태값을 텍스트로 보여주고, 판단 근거는 HTML에 보존한다.
+    const securityGrid = el(section, 'div', undefined, 'grid-2');
+    const securityCard = (name, tag) => {
+      const card = el(securityGrid, 'section', undefined, 'card student');
+      const head = el(card, 'div', undefined, 'row');
+      const heading = el(head, 'h3', name);
+      heading.style.fontSize = '1.1rem';
+      el(head, 'span', tag, 'tag');
+      return card;
+    };
+    const measuredTime = last ? '측정 시각 ' + timeText(last.at) : '미측정';
+    const unavailable = reason => {
+      const why = reason || (pcDashboard.phase === 'error' ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중');
+      return '확인 불가 · 이유: ' + why + ' · 다음 행동: ' + nextStep(why);
+    };
+    // 학생 카드 내부에서만 CSSOM으로 글자 크기를 지정합니다. 제공 CSS·DOM은 바꾸지 않습니다.
+    // 장식 아이콘·컬러 배너 없이 2열 실측 지표와 접근성 있는 HTML 텍스트를 사용합니다.
+    const metricRows = (card, items, description) => {
+      const group = el(card, 'div', undefined, items.length === 2 ? 'grid-2' : undefined);
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', description);
+      group.style.marginTop = '12px';
+      for (const [value, label] of items) {
+        const metric = el(group, 'div');
+        const number = el(metric, 'strong', value);
+        number.style.display = 'block';
+        number.style.fontSize = '2rem';
+        number.style.fontWeight = '750';
+        number.style.lineHeight = '1.25';
+        number.style.overflowWrap = 'anywhere';
+        const caption = el(metric, 'p', label);
+        caption.style.fontSize = '1rem';
+        caption.style.margin = '4px 0 0';
+        caption.style.lineHeight = '1.4';
+        caption.style.color = 'var(--muted)';
+      }
+    };
+    const evidence = (card, text) => {
+      const details = el(card, 'details');
+      el(details, 'summary', '측정 근거·해석 범위 보기');
+      for (const sentence of text) el(details, 'p', sentence, 'muted');
+    };
+    const networkCard = securityCard('네트워크 구성',
+      last?.networkInterfaces != null ? '로컬 PC 실측' : '측정 대기·확인 불가');
+    if (last?.networkInterfaces != null) {
+      metricRows(networkCard, [
+        [last.networkInterfaces + '개', '네트워크 인터페이스'],
+        [last.networkIpv4 + '개', 'IPv4 구성'],
+      ], '로컬 PC 네트워크 인터페이스와 IPv4 구성 개수. 인터넷 접속 성공을 의미하지 않음.');
+      el(networkCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
+    } else {
+      metricRows(networkCard, [['확인 불가', '네트워크 미측정']], '네트워크 구성 확인 불가');
+      el(networkCard, 'p', unavailable(last?.reasons?.network));
+    }
+    el(networkCard, 'p', '구성 수치 · 인터넷 접속 성공을 뜻하지 않음', 'muted');
+    evidence(networkCard, ['구성 개수만 조회하며 인터넷 접속이나 업무망 접근 허용을 증명하지 않습니다.',
+      '출처: 읽기 전용 로컬 PC 조회 · ' + measuredTime]);
+
+    const firewallCard = securityCard('Windows 방화벽 설정',
+      last?.firewallProfiles ? '로컬 설정 실측' : '측정 대기·확인 불가');
+    if (last?.firewallProfiles) {
+      const enabled = last.firewallProfiles.filter(p => p.enabled).length;
+      metricRows(firewallCard, [
+        [enabled + '개', '켜진 방화벽 프로필'],
+        [last.firewallProfiles.length + '개', '전체 프로필'],
+      ], '로컬 PC 방화벽 설정. 켜진 프로필 ' + enabled + '개 / 전체 ' + last.firewallProfiles.length
+        + '개. 전체 보안 안전 판정 아님.');
+      const badges = el(firewallCard, 'div', undefined, 'row');
+      for (const p of last.firewallProfiles) el(badges, 'span', p.name + ' · ' + (p.enabled ? '켜짐' : '꺼짐'), 'tag');
+      el(firewallCard, 'p', measuredTime + ' · 로컬 PC 설정 실측', 'muted');
+    } else {
+      metricRows(firewallCard, [['확인 불가', '방화벽 설정 미측정']], '방화벽 설정 확인 불가');
+      el(firewallCard, 'p', unavailable(last?.reasons?.firewall));
+    }
+    el(firewallCard, 'p', '설정만 확인 · 안전 판정 아님', 'muted');
+    evidence(firewallCard, ['설정 읽기 전용 · 변경하지 않음 · 켜져 있어도 전체 보안이 안전하다는 뜻이 아닙니다.',
+      '출처: 로컬 방화벽 설정 · ' + measuredTime]);
+
+    const windowsCard = securityCard('최근 Windows 기록',
+      last?.warnings != null ? 'System · Application' : '측정 대기·확인 불가');
+    if (last?.warnings != null) {
+      metricRows(windowsCard, [
+        [last.warnings + '건', 'Windows 경고'],
+        [last.errors + '건', 'Windows 오류'],
+      ], '최근 24시간 Windows 기록 집계. 침해 탐지 결과 아님.');
+      el(windowsCard, 'p', measuredTime + ' · 로컬 PC 실측', 'muted');
+      if (last.eventsTruncated) el(windowsCard, 'p', '최대 5,000건까지만 확인한 일부 집계입니다.', 'state state-empty');
+    } else {
+      metricRows(windowsCard, [['확인 불가', 'Windows 기록 미측정']], '경고 및 오류 집계 확인 불가');
+      el(windowsCard, 'p', unavailable(last?.reasons?.events));
+    }
+    el(windowsCard, 'p', '시스템 기록 건수 · 침해 탐지 결과 아님', 'muted');
+    evidence(windowsCard, [
+      last?.eventsSince ? '집계 시작 시각: ' + timeText(last.eventsSince) : '집계 시작 시각: 확인 불가',
+      last?.eventsTruncated ? '최대 5,000건까지만 집계한 일부 결과. 전체 사건 수가 아닙니다.'
+        : '최대 5,000건까지 확인한 집계 결과입니다.',
+      '경고·오류 건수는 침해나 공격 탐지 결과가 아닙니다. 악성 행위 발생 여부를 판정하지 않습니다.',
+    ]);
+
+    const sdpCard = securityCard('SDP 연결 상태', '로컬 PC 실측과 별개');
+    const sdpMode = me?.mode;
+    const sdpKnownDisconnected = sdpMode === 'disconnected' || sdpMode === 'demo'
+      || (me?.status === 'error' && me?.error?.code === 'ENGINE_NOT_CONNECTED');
+    if (sdpKnownDisconnected) {
+      metricRows(sdpCard, [['미연결', '원천 연결 확인 안 됨']], 'SDP 미연결 · PC 실측과 별개');
+      if (sdpMode === 'demo') el(sdpCard, 'p', '예시 자료 모드 · 실제 연결 아님', 'state state-empty');
+    } else if (me?.status === 'loading') {
+      metricRows(sdpCard, [['확인 중', '연결 결과 대기']], 'SDP 연결 확인 중 · 아직 성공 판정 불가');
+      el(sdpCard, 'p', '연결 성공 판정 전', 'state state-loading');
+    } else {
+      metricRows(sdpCard, [['확인 불가', '연결 성공 미검증']], 'SDP 연결 확인 불가 · 실제 접속 성공 미검증');
+      el(sdpCard, 'p', '현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.', 'state state-empty');
+    }
+    el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공', 'muted');
+    evidence(sdpCard, ['로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.']);
+    el(section, 'p', '핵심 기능 3가지 · ① PC 실측 변화 비교  ② CPU·메모리 실측 추이  ③ 기록·출처·다음 행동', 'notice');
+    const issues = last ? [
+      ['CPU', last.reasons.cpu], ['메모리', last.reasons.memory], ['디스크', last.reasons.disk],
+      ['네트워크', last.reasons.network], ['Windows 방화벽', last.reasons.firewall],
+      ['Windows 기록', last.reasons.events],
+    ].filter(([_, reason]) => reason !== null && reason !== undefined) : [];
+    if (issues.length) {
+      const notice = el(section, 'section', undefined, 'card');
+      el(notice, 'h4', '이번 조회에서 실패한 항목 · 다음 행동');
+      const list = el(notice, 'ul');
+      for (const [name, reason] of issues) {
+        el(list, 'li', name + ': 확인 불가 · 이유: ' + reason + ' · 다음 행동: ' + nextStep(reason));
+      }
+    }
+    const comparisonPanel = el(section, 'section');
+    const compareHeading = el(comparisonPanel, 'h3', '① PC 실측 변화 비교');
+    compareHeading.setAttribute('id', 'olpot-day4-comparison');
+    el(comparisonPanel, 'p', '서로 다른 두 시각의 유효한 실측값만 비교합니다. 값이 없으면 확인 불가로 표시합니다.', 'muted');
+    if (!comparable) el(comparisonPanel, 'p', '비교 대기: 서로 다른 측정 시각의 유효한 실측 결과 2회가 필요합니다. 위 「다시 조회」를 눌러주세요.', 'state state-empty');
+    const grid = el(comparisonPanel, 'div', undefined, 'grid-2');
+    const pct = v => v === null ? '확인 불가' : v.toFixed(1) + '%';
+    // Student-only inline SVG: no external chart library, script, CSS override or sample values.
+    // SVG shapes are generated only for validated real local measurements.
+    const graphColors = Object.freeze({
+      previous: '#99b8e8',
+      cpu: '#276ce0',
+      memory: '#7465d7',
+      disk: '#249e92',
+      events: '#d87533',
+      error: '#c95b4e',
+      text: '#23374f',
+      muted: '#53677f',
+      grid: '#dce4ef',
+    });
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svgItem = (parent, tag, attributes = {}, label) => {
+      const node = document.createElementNS(svgNS, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+      if (label !== undefined) node.textContent = String(label);
+      parent.appendChild(node);
+      return node;
+    };
+    const svgText = (parent, x, y, label, options = {}) => svgItem(parent, 'text', {
+      x, y, fill: graphColors.text, 'font-family': 'system-ui, Malgun Gothic, sans-serif',
+      'font-size': 12, ...options,
+    }, label);
+    const validPlotValue = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    const axisCeiling = (values, unit) => {
+      const maxValue = Math.max(0, ...values.filter(validPlotValue));
+      const step = unit === '%' ? 10 : unit === 'GB' ? 10 : 5;
+      const limit = Math.max(step, Math.ceil(maxValue * 1.15 / step) * step);
+      return unit === '%' ? Math.min(100, limit) : limit;
+    };
+    const appendComparisonChart = (card, title, oldValue, newValue, unit, color, display) => {
+      if (typeof document.createElementNS !== 'function' || !comparable
+        || !validPlotValue(oldValue) || !validPlotValue(newValue)) return;
+      const ceiling = axisCeiling([oldValue, newValue], unit);
+      const chart = svgItem(card, 'svg', {
+        viewBox: '0 0 360 148', width: '100%', height: 148,
+        preserveAspectRatio: 'xMidYMid meet', role: 'img',
+        'aria-label': title + ' 막대그래프. 이전 ' + display(oldValue) + ', 최근 ' + display(newValue)
+          + '. 0부터 ' + ceiling + unit + '까지의 눈금.',
+      });
+      svgItem(chart, 'title', {}, title + ' · 이전과 최근 실측 비교');
+      svgItem(chart, 'desc', {}, '이전: ' + display(oldValue) + ', 최근: ' + display(newValue)
+        + '. 두 값은 동일한 0 기준에서 비교하며 자동 눈금의 최대값은 ' + ceiling + unit + '입니다.');
+      svgText(chart, 14, 15, '눈금 0–' + ceiling + unit, { fill: graphColors.muted, 'font-size': 11 });
+      for (const y of [48, 78, 110]) {
+        svgItem(chart, 'line', { x1: 28, y1: y, x2: 333, y2: y, stroke: graphColors.grid, 'stroke-width': 1 });
+      }
+      const columns = [
+        { x: 87, name: '이전', value: oldValue, fill: graphColors.previous },
+        { x: 221, name: '최근', value: newValue, fill: color },
+      ];
+      for (const item of columns) {
+        const height = Math.max(0, Math.min(78, item.value / ceiling * 78));
+        if (height > 0) svgItem(chart, 'rect', {
+          x: item.x, y: 109 - height, width: 54, height, rx: 7, ry: 7, fill: item.fill,
+        });
+        svgText(chart, item.x + 27, Math.max(29, 103 - height), display(item.value), {
+          'text-anchor': 'middle', 'font-weight': 700, 'font-size': 13,
+        });
+        svgText(chart, item.x + 27, 132, item.name, {
+          'text-anchor': 'middle', fill: graphColors.muted, 'font-size': 12,
+        });
+      }
+    };
+    const appendTrendChart = (parent, measurements) => {
+      if (typeof document.createElementNS !== 'function') return;
+      const usable = measurements.some(sample => validPlotValue(sample.cpu) || validPlotValue(sample.memoryPercent));
+      if (!usable) return;
+      const ceiling = axisCeiling(measurements.flatMap(sample => [sample.cpu, sample.memoryPercent]), '%');
+      const svg = svgItem(parent, 'svg', {
+        viewBox: '0 0 720 252', width: '100%', height: 252,
+        preserveAspectRatio: 'xMidYMid meet', role: 'img',
+        'aria-label': '최근 ' + measurements.length + '회 수동 측정 CPU·메모리 사용률 막대 추이. 자세한 시각과 수치는 아래 기록에 있습니다.',
+      });
+      svgItem(svg, 'title', {}, 'CPU·메모리 사용률 · 측정 시각 순서대로 비교');
+      svgItem(svg, 'desc', {}, measurements.map((sample, index) =>
+        (index + 1) + '번 ' + timeText(sample.at)
+        + ' CPU ' + (validPlotValue(sample.cpu) ? sample.cpu.toFixed(1) + '%' : '확인 불가')
+        + ', 메모리 ' + (validPlotValue(sample.memoryPercent) ? sample.memoryPercent.toFixed(1) + '%' : '확인 불가')).join('; '));
+      const legend = [
+        { x: 490, label: 'CPU', color: graphColors.cpu },
+        { x: 590, label: '메모리', color: graphColors.memory },
+      ];
+      for (const item of legend) {
+        svgItem(svg, 'rect', { x: item.x, y: 8, width: 12, height: 12, rx: 3, fill: item.color });
+        svgText(svg, item.x + 18, 19, item.label, { fill: graphColors.muted, 'font-size': 12 });
+      }
+      const left = 48, top = 34, bottom = 199, width = 644, height = bottom - top;
+      for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+        const y = bottom - fraction * height;
+        svgItem(svg, 'line', { x1: left, y1: y, x2: left + width, y2: y,
+          stroke: graphColors.grid, 'stroke-width': 1 });
+        svgText(svg, left - 9, y + 4, String(Number((ceiling * fraction).toFixed(1))), {
+          'text-anchor': 'end', fill: graphColors.muted, 'font-size': 11,
+        });
+      }
+      const group = width / measurements.length;
+      const barWidth = Math.min(20, group * 0.28);
+      for (const [index, sample] of measurements.entries()) {
+        const center = left + group * (index + 0.5);
+        for (const info of [
+          { value: sample.cpu, x: center - barWidth - 2, color: graphColors.cpu },
+          { value: sample.memoryPercent, x: center + 2, color: graphColors.memory },
+        ]) {
+          if (!validPlotValue(info.value)) continue;
+          const barHeight = Math.max(0, Math.min(height, info.value / ceiling * height));
+          if (barHeight > 0) svgItem(svg, 'rect', {
+            x: info.x, y: bottom - barHeight, width: barWidth, height: barHeight,
+            rx: Math.min(5, barWidth / 3), ry: Math.min(5, barWidth / 3), fill: info.color,
+          });
+        }
+        svgText(svg, center, 221, String(index + 1), {
+          'text-anchor': 'middle', fill: graphColors.muted, 'font-size': 12,
+        });
+      }
+      svgText(svg, left, 243, '단위: % · 세로 눈금 0–' + ceiling
+        + '% · 가로 번호는 아래 실측 기록과 대응', { fill: graphColors.muted, 'font-size': 11 });
+    };
+
+    const gb = v => v === null ? '확인 불가' : bytes(v);
+    const delta = (v, unit, places) => (v >= 0 ? '+' : '') + v.toFixed(places) + ' ' + unit;
+    const comparison = (title, a, b, formatter, diff, unit, places, reasonA, reasonB, note, graphValue, graphUnit, graphColor) => {
+      const card = el(grid, 'section', undefined, 'card student');
+      el(card, 'h4', title);
+      if (!comparable) {
+        el(card, 'p', '확인 불가 · 유효한 두 시점의 측정 필요 · 다음 행동: 「다시 조회」로 두 번째 실측 기록');
+      } else if (a === null || b === null) {
+        el(card, 'p', '확인 불가 · ' + (a === null ? '이전: ' + (reasonA ?? '측정되지 않음') : '')
+          + (a === null && b === null ? ' / ' : '')
+          + (b === null ? '최근: ' + (reasonB ?? '측정되지 않음') : ''));
+      } else {
+        el(card, 'p', '변화 ' + delta(diff, unit, places), 'item-title');
+      }
+      if (graphValue && comparable && a !== null && b !== null) {
+        appendComparisonChart(card, title, graphValue(a), graphValue(b), graphUnit, graphColor,
+          value => graphUnit === 'GB' ? value.toFixed(1) + ' GB' : formatter(value));
+      }
+      if (previous && last) {
+        el(card, 'p', '이전 실측 ' + timeText(previous.at) + ' · ' + (a === null ? '확인 불가 (' + reasonA + ')' : formatter(a)), 'muted');
+        el(card, 'p', '최근 실측 ' + timeText(last.at) + ' · ' + (b === null ? '확인 불가 (' + reasonB + ')' : formatter(b)), 'muted');
+      }
+      el(card, 'p', note, 'muted');
+    };
+    comparison('CPU 사용률 변화', previous?.cpu ?? null, last?.cpu ?? null, pct,
+      (last?.cpu ?? 0) - (previous?.cpu ?? 0), '%p', 1,
+      previous?.reasons.cpu, last?.reasons.cpu, '사용률 차이(%p) · 높은 수치만으로 악성코드 판정 불가',
+      value => value, '%', graphColors.cpu);
+    comparison('메모리 사용률 변화', previous?.memoryPercent ?? null, last?.memoryPercent ?? null, pct,
+      (last?.memoryPercent ?? 0) - (previous?.memoryPercent ?? 0), '%p', 1,
+      previous?.reasons.memory, last?.reasons.memory, '실측 사용량/총량으로 계산한 비율의 차이(%p)',
+      value => value, '%', graphColors.memory);
+    comparison('디스크 여유 공간 변화', previous?.diskFree ?? null, last?.diskFree ?? null, gb,
+      ((last?.diskFree ?? 0) - (previous?.diskFree ?? 0)) / 1073741824, 'GB', 2,
+      previous?.reasons.disk, last?.reasons.disk, '앱이 설치된 디스크의 여유 공간 차이(GB)',
+      value => value / 1073741824, 'GB', graphColors.disk);
+    const windowsDiff = comparable && previous.warnings !== null && last.warnings !== null
+      && previous.errors !== null && last.errors !== null;
+    const eventsBox = el(grid, 'section', undefined, 'card student');
+    el(eventsBox, 'h3', 'Windows 기록 집계 변화');
+    el(eventsBox, 'p', windowsDiff
+      ? '경고 ' + delta(last.warnings - previous.warnings, '건', 0)
+        + ' · 오류 ' + delta(last.errors - previous.errors, '건', 0)
+      : '확인 불가 · ' + (previous?.reasons.events ?? last?.reasons.events ?? '두 시점 측정 필요'), 'item-title');
+    if (windowsDiff) {
+      appendComparisonChart(eventsBox, 'Windows 경고 건수', previous.warnings, last.warnings, '건',
+        graphColors.events, value => value + '건');
+      appendComparisonChart(eventsBox, 'Windows 오류 건수', previous.errors, last.errors, '건',
+        graphColors.error, value => value + '건');
+    }
+    if (previous && last) {
+      el(eventsBox, 'p', '이전 실측 ' + timeText(previous.at) + ' · '
+        + (previous.warnings === null ? '확인 불가 (' + previous.reasons.events + ')' : '경고 ' + previous.warnings + '건 · 오류 ' + previous.errors + '건'));
+      el(eventsBox, 'p', '최근 실측 ' + timeText(last.at) + ' · '
+        + (last.warnings === null ? '확인 불가 (' + last.reasons.events + ')' : '경고 ' + last.warnings + '건 · 오류 ' + last.errors + '건'));
+    }
+    el(eventsBox, 'p', '최근 24시간 집계의 시점별 차이일 뿐 신규 위협 건수가 아닙니다. 최대 5,000건만 읽습니다.'
+      + (previous?.eventsTruncated || last?.eventsTruncated ? ' 일부 집계로 전체 증감을 알 수 없습니다.' : ''));
+
+    const trend = el(section, 'section', undefined, 'card');
+    const trendHeading = el(trend, 'h3', '② CPU·메모리 실측 추이');
+    trendHeading.setAttribute('id', 'olpot-day4-trend');
+    el(trend, 'p', '최근 12회 수동 조회 결과 · 각 값의 단위 % · 실제 측정점만 표시 · 새로고침 후 이력 초기화', 'muted');
+    if (samples.length < 2) {
+      el(trend, 'p', '추이 데이터 부족: 위 「다시 조회」를 눌러 서로 다른 시각의 실측 결과 2회를 기록하세요. 예시 그래프는 넣지 않습니다.', 'state state-empty');
+    } else {
+      appendTrendChart(trend, samples);
+      const history = el(trend, 'ol', undefined, 'records');
+      for (const [index, sample] of samples.entries()) {
+        const entry = el(history, 'li', undefined, 'event');
+        el(entry, 'h4', String(index + 1).padStart(2, '0') + ' · 실측 ' + timeText(sample.at));
+        el(entry, 'p', 'CPU '
+          + (sample.cpu === null ? '확인 불가 (' + sample.reasons.cpu + ')' : pct(sample.cpu))
+          + ' · 메모리 ' + (sample.memoryPercent === null
+            ? '확인 불가 (' + sample.reasons.memory + ')' : pct(sample.memoryPercent)), 'item-title');
+        el(entry, 'p', '디스크 여유 ' + (sample.diskFree === null ? '확인 불가 (' + sample.reasons.disk + ')' : gb(sample.diskFree))
+          + ' · Windows 경고 ' + (sample.warnings === null ? '확인 불가 (' + sample.reasons.events + ')' : sample.warnings + '건')
+          + ' · 오류 ' + (sample.errors === null ? '확인 불가 (' + sample.reasons.events + ')' : sample.errors + '건'), 'muted');
+      }
+      el(trend, 'p', '가로 번호는 아래 기록 순서와 같습니다. 실제 측정하지 않은 시각의 값은 표시하거나 추정하지 않습니다.', 'muted');
+    }
+    const records = el(section, 'section', undefined, 'card');
+    const recordsHeading = el(records, 'h3', '③ 기록·출처·다음 행동');
+    recordsHeading.setAttribute('id', 'olpot-day4-records');
+    el(records, 'p', '측정 출처: /api/pc/status (읽기 전용 로컬 PC API). 원본 데이터는 제공 「내 PC 상태」 기능과 동일한 경로에서 조회하며 설정값을 변경하지 않습니다.', 'item-title');
+    const modes = { connected: '연결됨(실제 원천 데이터 별도 확인 필요)',
+      disconnected: '연결 없음', demo: '예제 자료 · 실제 연결 아님', unknown: '확인 불가' };
+    const mode = typeof me?.mode === 'string' && Object.hasOwn(modes, me.mode) ? me.mode : 'unknown';
+    el(records, 'p', '신원·계정 데이터 모드: ' + modes[mode]
+      + ' · SDP 연결 여부는 위의 별도 카드에서 확인하세요. 실제 접속·XDR 기록은 기존 「보안 기록」 메뉴에서 별도로 확인하세요.', 'muted');
+    if (samples.length) {
+      el(records, 'p', '이 페이지의 과거 실측 이력 ' + samples.length
+        + '건 보유 · 브라우저를 새로고침하면 사라집니다. 영구 저장 기능이 아닙니다.', 'muted');
+    }
+    root.insertBefore(section, root.firstChild);
+  };
+
   return {
     renderIdentity({ me, devices, sessions }) {
       // Render a fresh DOM tree for each snapshot; never retain the previous identity.
       const root = document.createElement('div');
+      // 두 제공/학생 신원 카드의 동일 행 높이를 줄이기 위해 학생 상세만 접습니다.
+      // 제공 카드의 DOM, CSS, 원본 API 응답은 변경하지 않습니다.
+      const details = document.createElement('details');
+      details.open = identityDetailsOpen;
+      const visibleState = me?.status === 'loading' ? '불러오는 중'
+        : me?.mode === 'disconnected' ? '연결 없음 (disconnected)'
+        : me?.mode === 'demo' ? '예제 자료 (demo)'
+        : me?.mode === 'connected' ? '연결 모드 (connected)'
+        : me?.status === 'error' ? '연결 실패'
+        : '확인 불가';
+      const label = document.createElement('summary');
+      label.textContent = '계정·기기·세션 상세 보기 · ' + visibleState;
+      details.appendChild(label);
+      details.addEventListener('toggle', () => { identityDetailsOpen = details.open; });
+      root.appendChild(details);
       const text = (value) => typeof value === 'string' && value.trim() ? value : '확인 불가';
       const stateWithCode = (label, status) => `${label} (${text(status)})`;
       const deviceState = (status) => stateWithCode(({
@@ -43,7 +583,7 @@ export function createStudentView() {
         } else {
           add(box, 'p', '확인 불가');
         }
-        root.appendChild(box);
+        details.appendChild(box);
       };
 
       section('현재 계정·기기·세션', me, (box, data) => {
@@ -75,6 +615,7 @@ export function createStudentView() {
         box.appendChild(list);
       });
 
+      // 관제 화면은 별도 전체 너비 학생 상태 영역에서 표시.
       return root;
     },
     renderDecision({ status, mode, data, error, appId } = {}) {
@@ -502,6 +1043,8 @@ export function createStudentView() {
         });
       }
       root.appendChild(support);
+      // 제공 UI를 건드리지 않고 전체 너비 학생 영역에서 관제를 우선 표시.
+      renderPcDashboard(root, { mode });
       return root;
     },
     renderVulnerabilities({ status = 'idle', mode, data, error } = {}) {
