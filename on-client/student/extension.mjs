@@ -286,7 +286,8 @@ export function createStudentView({ api, onChange } = {}) {
       return unit === '%' ? Math.min(100, limit) : limit;
     };
     const appendComparisonChart = (card, title, oldValue, newValue, unit, color, display) => {
-      if (!comparable || !validPlotValue(oldValue) || !validPlotValue(newValue)) return;
+      if (typeof document.createElementNS !== 'function' || !comparable
+        || !validPlotValue(oldValue) || !validPlotValue(newValue)) return;
       const ceiling = axisCeiling([oldValue, newValue], unit);
       const chart = svgItem(card, 'svg', {
         viewBox: '0 0 360 148', width: '100%', height: 148,
@@ -319,6 +320,7 @@ export function createStudentView({ api, onChange } = {}) {
       }
     };
     const appendTrendChart = (parent, measurements) => {
+      if (typeof document.createElementNS !== 'function') return;
       const usable = measurements.some(sample => validPlotValue(sample.cpu) || validPlotValue(sample.memoryPercent));
       if (!usable) return;
       const ceiling = axisCeiling(measurements.flatMap(sample => [sample.cpu, sample.memoryPercent]), '%');
