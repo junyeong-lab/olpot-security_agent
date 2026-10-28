@@ -37,6 +37,15 @@ export function createStudentView({ api, onChange } = {}) {
     const memory = localMetric(data, 'memory');
     const disk = localMetric(data, 'disk');
     const events = localMetric(data, 'events');
+    const network = localMetric(data, 'network');
+    const firewall = localMetric(data, 'firewall');
+    const networkValid = Number.isSafeInteger(network?.interfaceCount) && network.interfaceCount >= 0
+      && Number.isSafeInteger(network?.ipv4Count) && network.ipv4Count >= 0;
+    const profileNames = ['Domain', 'Private', 'Public'];
+    const firewallValid = Array.isArray(firewall?.profiles) && firewall.profiles.length === 3
+      && profileNames.every(name => firewall.profiles.filter(p => p?.name === name && typeof p.enabled === 'boolean').length === 1);
+    const windowSince = typeof events?.since === 'string' && Number.isFinite(Date.parse(events.since))
+      ? events.since : null;
     const cpuPercent = percent(cpu?.usagePercent);
     const memoryValid = readableNumber(memory?.usedBytes) && readableNumber(memory?.totalBytes)
       && memory.totalBytes > 0 && memory.usedBytes <= memory.totalBytes;
@@ -56,11 +65,20 @@ export function createStudentView({ api, onChange } = {}) {
       warnings: eventsValid ? events.warningCount : null,
       errors: eventsValid ? events.errorCount : null,
       eventsTruncated: eventsValid ? events.truncated : null,
+      eventsSince: eventsValid ? windowSince : null,
+      networkInterfaces: networkValid ? network.interfaceCount : null,
+      networkIpv4: networkValid ? network.ipv4Count : null,
+      firewallProfiles: firewallValid
+        ? Object.freeze(profileNames.map(name => Object.freeze({
+          name, enabled: firewall.profiles.find(p => p.name === name).enabled,
+        }))) : null,
       reasons: {
         cpu: cpuPercent === null ? missingReason(data?.metrics?.cpu) : null,
         memory: !memoryValid ? missingReason(data?.metrics?.memory) : null,
         disk: !diskValid ? missingReason(data?.metrics?.disk) : null,
         events: !eventsValid ? missingReason(data?.metrics?.events) : null,
+        network: !networkValid ? missingReason(data?.metrics?.network) : null,
+        firewall: !firewallValid ? missingReason(data?.metrics?.firewall) : null,
       },
     });
   };
@@ -110,7 +128,8 @@ export function createStudentView({ api, onChange } = {}) {
     const last = pcDashboard.phase === 'ok' ? samples[samples.length - 1] : null;
     const previous = last && samples.length >= 2 ? samples[samples.length - 2] : null;
     const comparable = previous && Date.parse(last.at) > Date.parse(previous.at);
-    const source = last ? (last.cpu === null && last.memoryPercent === null && last.diskFree === null && last.warnings === null
+    const source = last ? (last.cpu === null && last.memoryPercent === null && last.diskFree === null
+      && last.warnings === null && last.networkInterfaces === null && last.firewallProfiles === null
       ? '로컬 응답 확인 · 모든 측정값 확인 불가 · 확인 시각 ' : '일부 또는 전체 항목 실측 확인 · 이 PC · 최근 측정 ') + timeText(last.at)
       : pcDashboard.phase === 'loading' ? '실측 조회 중 · 현재값 대기'
       : pcDashboard.phase === 'error' ? '이번 조회 확인 불가 · 이전 이력은 현재값이 아님'
@@ -121,6 +140,63 @@ export function createStudentView({ api, onChange } = {}) {
     }
     if (!comparable) el(section, 'p', '변화 비교 전 · 서로 다른 측정 시각의 유효한 실측 결과 2회가 필요합니다.');
 
+    // 3일차 관제 상태 카드: 읽기 전용 로컬 측정 3종과 별개의 SDP 연결 근거.
+    // 실측이 실패했다면 지난 측정 이력을 현재값으로 승격하지 않는다.
+    const securityGrid = el(section, 'div', undefined, 'grid-2');
+    const securityCard = title => {
+      const card = el(securityGrid, 'section', undefined, 'card student');
+      el(card, 'h4', title);
+      return card;
+    };
+    const measuredTime = last ? ' · 측정 시각 ' + timeText(last.at) : '';
+    const unavailable = reason => '확인 불가 · 이유: ' + (reason || (pcDashboard.phase === 'error'
+      ? pcDashboard.message : '실제 로컬 조회 전 또는 조회 중'));
+    const networkCard = securityCard('네트워크 구성');
+    if (last?.networkInterfaces !== null && last?.networkInterfaces !== undefined) {
+      el(networkCard, 'p', '네트워크 인터페이스 ' + last.networkInterfaces + '개 · IPv4 구성 '
+        + last.networkIpv4 + '개' + measuredTime + ' · 로컬 PC 실측');
+    } else {
+      el(networkCard, 'p', unavailable(last?.reasons?.network));
+    }
+    el(networkCard, 'p', '구성 개수만 조회하며 인터넷 접속이나 업무망 접근 허용을 증명하지 않습니다.');
+
+    const firewallCard = securityCard('Windows 방화벽 설정');
+    if (last?.firewallProfiles) {
+      for (const p of last.firewallProfiles) {
+        el(firewallCard, 'p', p.name + ': ' + (p.enabled ? '켜짐' : '꺼짐')
+          + measuredTime + ' · 로컬 PC 설정 실측');
+      }
+    } else {
+      el(firewallCard, 'p', unavailable(last?.reasons?.firewall));
+    }
+    el(firewallCard, 'p', '설정 읽기 전용 · 변경하지 않음 · 켜져 있어도 전체 보안이 안전하다는 뜻이 아닙니다.');
+
+    const windowsCard = securityCard('최근 Windows 기록');
+    if (last?.warnings !== null && last?.warnings !== undefined) {
+      el(windowsCard, 'p', 'System·Application · 최근 24시간 경고 ' + last.warnings
+        + '건 · 오류 ' + last.errors + '건' + measuredTime + ' · 로컬 PC 실측');
+      if (last.eventsSince) el(windowsCard, 'p', '집계 시작 시각: ' + timeText(last.eventsSince));
+      el(windowsCard, 'p', last.eventsTruncated
+        ? '최대 5,000건까지만 집계한 일부 결과. 전체 사건 수가 아닙니다.'
+        : '최대 5,000건까지 확인한 집계 결과입니다.');
+    } else {
+      el(windowsCard, 'p', unavailable(last?.reasons?.events));
+    }
+    el(windowsCard, 'p', '경고·오류 건수는 침해나 공격 탐지 결과가 아닙니다. 악성 행위 발생 여부를 판정하지 않습니다.');
+
+    const sdpCard = securityCard('SDP 연결 상태 (PC 조회와 별개)');
+    const sdpMode = me?.mode;
+    const sdpKnownDisconnected = sdpMode === 'disconnected' || sdpMode === 'demo'
+      || (me?.status === 'error' && me?.error?.code === 'ENGINE_NOT_CONNECTED');
+    if (sdpKnownDisconnected) {
+      el(sdpCard, 'p', 'SDP 미연결' + (sdpMode === 'demo' ? ' · 예시 자료 모드 (실제 연결 아님)' : ''));
+    } else if (me?.status === 'loading') {
+      el(sdpCard, 'p', 'SDP 연결 확인 중 · 아직 성공 판정 불가');
+    } else {
+      el(sdpCard, 'p', 'SDP 연결 확인 불가 · 현재 신원·연결 모드만으로 실제 SDP 접속 성공을 검증할 수 없습니다.');
+    }
+    el(sdpCard, 'p', '로컬 PC 측정 성공 ≠ SDP 연결 성공. 원천 판정·실제 XDR 기록은 별도 연결 확인이 필요합니다.');
+    el(section, 'h4', '2일차 · 실측 변화 비교 (유지)');
     const grid = el(section, 'div', undefined, 'grid-2');
     const pct = v => v === null ? '확인 불가' : v.toFixed(1) + '%';
     const gb = v => v === null ? '확인 불가' : bytes(v);
@@ -190,8 +266,8 @@ export function createStudentView({ api, onChange } = {}) {
     const modes = { connected: '연결됨(실제 원천 데이터 별도 확인 필요)',
       disconnected: '연결 없음', demo: '예제 자료 · 실제 연결 아님', unknown: '확인 불가' };
     const mode = typeof me?.mode === 'string' && Object.hasOwn(modes, me.mode) ? me.mode : 'unknown';
-    el(records, 'p', '업무 앱·XDR 원천 상태: ' + modes[mode]
-      + ' · 실제 접속·XDR 기록은 기존 「보안 기록」 메뉴에서 별도로 확인하세요.');
+    el(records, 'p', '신원·계정 데이터 모드: ' + modes[mode]
+      + ' · SDP 연결 여부는 위의 별도 카드에서 확인하세요. 실제 접속·XDR 기록은 기존 「보안 기록」 메뉴에서 별도로 확인하세요.');
     if (samples.length) {
       el(records, 'p', '이 페이지의 과거 실측 이력 ' + samples.length
         + '건 보유 · 브라우저를 새로고침하면 사라집니다. 영구 저장 기능이 아닙니다.');
