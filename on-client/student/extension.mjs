@@ -253,9 +253,128 @@ export function createStudentView({ api, onChange } = {}) {
     if (!comparable) el(comparisonPanel, 'p', '비교 대기: 서로 다른 측정 시각의 유효한 실측 결과 2회가 필요합니다. 위 「다시 조회」를 눌러주세요.', 'state state-empty');
     const grid = el(comparisonPanel, 'div', undefined, 'grid-2');
     const pct = v => v === null ? '확인 불가' : v.toFixed(1) + '%';
+    // Student-only inline SVG: no external chart library, script, CSS override or sample values.
+    // SVG shapes are generated only for validated real local measurements.
+    const graphColors = Object.freeze({
+      previous: '#99b8e8',
+      cpu: '#276ce0',
+      memory: '#7465d7',
+      disk: '#249e92',
+      events: '#d87533',
+      error: '#c95b4e',
+      text: '#23374f',
+      muted: '#53677f',
+      grid: '#dce4ef',
+    });
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svgItem = (parent, tag, attributes = {}, label) => {
+      const node = document.createElementNS(svgNS, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+      if (label !== undefined) node.textContent = String(label);
+      parent.appendChild(node);
+      return node;
+    };
+    const svgText = (parent, x, y, label, options = {}) => svgItem(parent, 'text', {
+      x, y, fill: graphColors.text, 'font-family': 'system-ui, Malgun Gothic, sans-serif',
+      'font-size': 12, ...options,
+    }, label);
+    const validPlotValue = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    const axisCeiling = (values, unit) => {
+      const maxValue = Math.max(0, ...values.filter(validPlotValue));
+      const step = unit === '%' ? 10 : unit === 'GB' ? 10 : 5;
+      const limit = Math.max(step, Math.ceil(maxValue * 1.15 / step) * step);
+      return unit === '%' ? Math.min(100, limit) : limit;
+    };
+    const appendComparisonChart = (card, title, oldValue, newValue, unit, color, display) => {
+      if (!comparable || !validPlotValue(oldValue) || !validPlotValue(newValue)) return;
+      const ceiling = axisCeiling([oldValue, newValue], unit);
+      const chart = svgItem(card, 'svg', {
+        viewBox: '0 0 360 148', width: '100%', height: 148,
+        preserveAspectRatio: 'xMidYMid meet', role: 'img',
+        'aria-label': title + ' 막대그래프. 이전 ' + display(oldValue) + ', 최근 ' + display(newValue)
+          + '. 0부터 ' + ceiling + unit + '까지의 눈금.',
+      });
+      svgItem(chart, 'title', {}, title + ' · 이전과 최근 실측 비교');
+      svgItem(chart, 'desc', {}, '이전: ' + display(oldValue) + ', 최근: ' + display(newValue)
+        + '. 두 값은 동일한 0 기준에서 비교하며 자동 눈금의 최대값은 ' + ceiling + unit + '입니다.');
+      svgText(chart, 14, 15, '눈금 0–' + ceiling + unit, { fill: graphColors.muted, 'font-size': 11 });
+      for (const y of [48, 78, 110]) {
+        svgItem(chart, 'line', { x1: 28, y1: y, x2: 333, y2: y, stroke: graphColors.grid, 'stroke-width': 1 });
+      }
+      const columns = [
+        { x: 87, name: '이전', value: oldValue, fill: graphColors.previous },
+        { x: 221, name: '최근', value: newValue, fill: color },
+      ];
+      for (const item of columns) {
+        const height = Math.max(0, Math.min(78, item.value / ceiling * 78));
+        if (height > 0) svgItem(chart, 'rect', {
+          x: item.x, y: 109 - height, width: 54, height, rx: 7, ry: 7, fill: item.fill,
+        });
+        svgText(chart, item.x + 27, Math.max(29, 103 - height), display(item.value), {
+          'text-anchor': 'middle', 'font-weight': 700, 'font-size': 13,
+        });
+        svgText(chart, item.x + 27, 132, item.name, {
+          'text-anchor': 'middle', fill: graphColors.muted, 'font-size': 12,
+        });
+      }
+    };
+    const appendTrendChart = (parent, measurements) => {
+      const usable = measurements.some(sample => validPlotValue(sample.cpu) || validPlotValue(sample.memoryPercent));
+      if (!usable) return;
+      const ceiling = axisCeiling(measurements.flatMap(sample => [sample.cpu, sample.memoryPercent]), '%');
+      const svg = svgItem(parent, 'svg', {
+        viewBox: '0 0 720 252', width: '100%', height: 252,
+        preserveAspectRatio: 'xMidYMid meet', role: 'img',
+        'aria-label': '최근 ' + measurements.length + '회 수동 측정 CPU·메모리 사용률 막대 추이. 자세한 시각과 수치는 아래 기록에 있습니다.',
+      });
+      svgItem(svg, 'title', {}, 'CPU·메모리 사용률 · 측정 시각 순서대로 비교');
+      svgItem(svg, 'desc', {}, measurements.map((sample, index) =>
+        (index + 1) + '번 ' + timeText(sample.at)
+        + ' CPU ' + (validPlotValue(sample.cpu) ? sample.cpu.toFixed(1) + '%' : '확인 불가')
+        + ', 메모리 ' + (validPlotValue(sample.memoryPercent) ? sample.memoryPercent.toFixed(1) + '%' : '확인 불가')).join('; '));
+      const legend = [
+        { x: 490, label: 'CPU', color: graphColors.cpu },
+        { x: 590, label: '메모리', color: graphColors.memory },
+      ];
+      for (const item of legend) {
+        svgItem(svg, 'rect', { x: item.x, y: 8, width: 12, height: 12, rx: 3, fill: item.color });
+        svgText(svg, item.x + 18, 19, item.label, { fill: graphColors.muted, 'font-size': 12 });
+      }
+      const left = 48, top = 34, bottom = 199, width = 644, height = bottom - top;
+      for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+        const y = bottom - fraction * height;
+        svgItem(svg, 'line', { x1: left, y1: y, x2: left + width, y2: y,
+          stroke: graphColors.grid, 'stroke-width': 1 });
+        svgText(svg, left - 9, y + 4, String(Number((ceiling * fraction).toFixed(1))), {
+          'text-anchor': 'end', fill: graphColors.muted, 'font-size': 11,
+        });
+      }
+      const group = width / measurements.length;
+      const barWidth = Math.min(20, group * 0.28);
+      for (const [index, sample] of measurements.entries()) {
+        const center = left + group * (index + 0.5);
+        for (const info of [
+          { value: sample.cpu, x: center - barWidth - 2, color: graphColors.cpu },
+          { value: sample.memoryPercent, x: center + 2, color: graphColors.memory },
+        ]) {
+          if (!validPlotValue(info.value)) continue;
+          const barHeight = Math.max(0, Math.min(height, info.value / ceiling * height));
+          if (barHeight > 0) svgItem(svg, 'rect', {
+            x: info.x, y: bottom - barHeight, width: barWidth, height: barHeight,
+            rx: Math.min(5, barWidth / 3), ry: Math.min(5, barWidth / 3), fill: info.color,
+          });
+        }
+        svgText(svg, center, 221, String(index + 1), {
+          'text-anchor': 'middle', fill: graphColors.muted, 'font-size': 12,
+        });
+      }
+      svgText(svg, left, 243, '단위: % · 세로 눈금 0–' + ceiling
+        + '% · 가로 번호는 아래 실측 기록과 대응', { fill: graphColors.muted, 'font-size': 11 });
+    };
+
     const gb = v => v === null ? '확인 불가' : bytes(v);
     const delta = (v, unit, places) => (v >= 0 ? '+' : '') + v.toFixed(places) + ' ' + unit;
-    const comparison = (title, a, b, formatter, diff, unit, places, reasonA, reasonB, note) => {
+    const comparison = (title, a, b, formatter, diff, unit, places, reasonA, reasonB, note, graphValue, graphUnit, graphColor) => {
       const card = el(grid, 'section', undefined, 'card student');
       el(card, 'h4', title);
       if (!comparable) {
@@ -267,6 +386,9 @@ export function createStudentView({ api, onChange } = {}) {
       } else {
         el(card, 'p', '변화 ' + delta(diff, unit, places), 'item-title');
       }
+      if (graphValue && comparable && a !== null && b !== null) {
+        appendComparisonChart(card, title, graphValue(a), graphValue(b), graphUnit, graphColor, formatter);
+      }
       if (previous && last) {
         el(card, 'p', '이전 실측 ' + timeText(previous.at) + ' · ' + (a === null ? '확인 불가 (' + reasonA + ')' : formatter(a)), 'muted');
         el(card, 'p', '최근 실측 ' + timeText(last.at) + ' · ' + (b === null ? '확인 불가 (' + reasonB + ')' : formatter(b)), 'muted');
@@ -275,13 +397,16 @@ export function createStudentView({ api, onChange } = {}) {
     };
     comparison('CPU 사용률 변화', previous?.cpu ?? null, last?.cpu ?? null, pct,
       (last?.cpu ?? 0) - (previous?.cpu ?? 0), '%p', 1,
-      previous?.reasons.cpu, last?.reasons.cpu, '사용률 차이(%p) · 높은 수치만으로 악성코드 판정 불가');
+      previous?.reasons.cpu, last?.reasons.cpu, '사용률 차이(%p) · 높은 수치만으로 악성코드 판정 불가',
+      value => value, '%', graphColors.cpu);
     comparison('메모리 사용률 변화', previous?.memoryPercent ?? null, last?.memoryPercent ?? null, pct,
       (last?.memoryPercent ?? 0) - (previous?.memoryPercent ?? 0), '%p', 1,
-      previous?.reasons.memory, last?.reasons.memory, '실측 사용량/총량으로 계산한 비율의 차이(%p)');
+      previous?.reasons.memory, last?.reasons.memory, '실측 사용량/총량으로 계산한 비율의 차이(%p)',
+      value => value, '%', graphColors.memory);
     comparison('디스크 여유 공간 변화', previous?.diskFree ?? null, last?.diskFree ?? null, gb,
       ((last?.diskFree ?? 0) - (previous?.diskFree ?? 0)) / 1073741824, 'GB', 2,
-      previous?.reasons.disk, last?.reasons.disk, '앱이 설치된 디스크의 여유 공간 차이(GB)');
+      previous?.reasons.disk, last?.reasons.disk, '앱이 설치된 디스크의 여유 공간 차이(GB)',
+      value => value / 1073741824, 'GB', graphColors.disk);
     const windowsDiff = comparable && previous.warnings !== null && last.warnings !== null
       && previous.errors !== null && last.errors !== null;
     const eventsBox = el(grid, 'section', undefined, 'card student');
@@ -290,6 +415,12 @@ export function createStudentView({ api, onChange } = {}) {
       ? '경고 ' + delta(last.warnings - previous.warnings, '건', 0)
         + ' · 오류 ' + delta(last.errors - previous.errors, '건', 0)
       : '확인 불가 · ' + (previous?.reasons.events ?? last?.reasons.events ?? '두 시점 측정 필요'), 'item-title');
+    if (windowsDiff) {
+      appendComparisonChart(eventsBox, 'Windows 경고 건수', previous.warnings, last.warnings, '건',
+        graphColors.events, value => value + '건');
+      appendComparisonChart(eventsBox, 'Windows 오류 건수', previous.errors, last.errors, '건',
+        graphColors.error, value => value + '건');
+    }
     if (previous && last) {
       el(eventsBox, 'p', '이전 실측 ' + timeText(previous.at) + ' · '
         + (previous.warnings === null ? '확인 불가 (' + previous.reasons.events + ')' : '경고 ' + previous.warnings + '건 · 오류 ' + previous.errors + '건'));
@@ -302,10 +433,11 @@ export function createStudentView({ api, onChange } = {}) {
     const trend = el(section, 'section', undefined, 'card');
     const trendHeading = el(trend, 'h3', '② CPU·메모리 실측 추이');
     trendHeading.setAttribute('id', 'olpot-day4-trend');
-    el(trend, 'p', '최근 12회 수동 조회 결과 · 각 값의 단위 % · 새로고침 후 측정 이력 초기화', 'muted');
+    el(trend, 'p', '최근 12회 수동 조회 결과 · 각 값의 단위 % · 실제 측정점만 표시 · 새로고침 후 이력 초기화', 'muted');
     if (samples.length < 2) {
       el(trend, 'p', '추이 데이터 부족: 위 「다시 조회」를 눌러 서로 다른 시각의 실측 결과 2회를 기록하세요. 예시 그래프는 넣지 않습니다.', 'state state-empty');
     } else {
+      appendTrendChart(trend, samples);
       const history = el(trend, 'ol', undefined, 'records');
       for (const [index, sample] of samples.entries()) {
         const entry = el(history, 'li', undefined, 'event');
@@ -314,8 +446,11 @@ export function createStudentView({ api, onChange } = {}) {
           + (sample.cpu === null ? '확인 불가 (' + sample.reasons.cpu + ')' : pct(sample.cpu))
           + ' · 메모리 ' + (sample.memoryPercent === null
             ? '확인 불가 (' + sample.reasons.memory + ')' : pct(sample.memoryPercent)), 'item-title');
+        el(entry, 'p', '디스크 여유 ' + (sample.diskFree === null ? '확인 불가 (' + sample.reasons.disk + ')' : gb(sample.diskFree))
+          + ' · Windows 경고 ' + (sample.warnings === null ? '확인 불가 (' + sample.reasons.events + ')' : sample.warnings + '건')
+          + ' · 오류 ' + (sample.errors === null ? '확인 불가 (' + sample.reasons.events + ')' : sample.errors + '건'), 'muted');
       }
-      el(trend, 'p', '시점별 변화를 나열한 기록입니다. 실측이 없는 사이의 중간값은 추정하지 않습니다.', 'muted');
+      el(trend, 'p', '가로 번호는 아래 기록 순서와 같습니다. 실제 측정하지 않은 시각의 값은 표시하거나 추정하지 않습니다.', 'muted');
     }
     const records = el(section, 'section', undefined, 'card');
     const recordsHeading = el(records, 'h3', '③ 기록·출처·다음 행동');
