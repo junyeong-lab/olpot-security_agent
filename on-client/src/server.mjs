@@ -23,6 +23,7 @@ import {createNativeHostContext,captureNativeHostConfiguration,readNativeHostCon
 import {APPEARANCE_IMAGES,appearanceCss,appearanceView} from './student-appearance.mjs';
 import {readStudentAppearance} from './student-appearance-files.mjs';
 import {readPcStatus} from './pc-status.mjs';
+import {readWindowsEventDetails} from './windows-event-details.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(value);
@@ -443,6 +444,12 @@ export function createOnServer(serverOptions={}) {
         if(req.method!=='GET'){send(405,{ok:false,error:{code:'METHOD_NOT_ALLOWED',message:'조회만 지원합니다.',retryable:false}});return;}
         if(req.headers.origin!==undefined&&req.headers.origin!==`http://${host}`)throw engineError('ORIGIN_REJECTED','',403);
         const data=await bounded(signal=>readPcStatus({signal,directory:assetsRoot}));
+        send(200,{ok:true,data});return;
+      }
+      if(url.pathname==='/api/pc/events'){
+        if(req.method!=='GET'){send(405,{ok:false,error:{code:'METHOD_NOT_ALLOWED',message:'조회만 지원합니다.',retryable:false}});return;}
+        if(req.headers.origin!==undefined&&req.headers.origin!==`http://${host}`)throw engineError('ORIGIN_REJECTED','',403);
+        const data=await bounded(signal=>readWindowsEventDetails({signal}));
         send(200,{ok:true,data});return;
       }
       if(url.pathname.startsWith('/api/native-login/')){
