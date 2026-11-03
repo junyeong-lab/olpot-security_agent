@@ -50,7 +50,40 @@ test('비-Windows에서는 Windows 조회를 미지원으로 표시한다', asyn
   const result=await reader();
   assert.equal(result.metrics.cpu.state,'ok');
   assert.equal(result.metrics.memory.state,'ok');
-  for (const key of ['vpn','antivirus','signins','firewall','events']) {
+  for (const key of ['vpn','antivirus','avProducts','signins','firewall','events']) {
     assert.deepEqual(result.metrics[key], {state:'unavailable',reason:'unsupported'});
   }
+});
+
+test('Windows 기록 반복 오류 상위 유형만 검증해 표시하며 원문은 제외한다', () => {
+  const m = normalizeWindowsStatus({
+    events: {state:'ok',warningCount:18,errorCount:361,sampleLimit:5000,truncated:false,since,
+      topErrors:[{providerName:'Microsoft-Windows-User Profiles Service',eventId:1552,count:350,message:'secret'}]},
+  });
+  assert.equal(m.events.topErrors[0].count,350);
+  assert.equal(JSON.stringify(m).includes('secret'),false);
+  const display=pcMetricText('events',m.events);
+  assert.match(display.note,/1552/);
+  assert.match(display.note,/350건/);
+  const bad=normalizeWindowsStatus({events:{state:'ok',warningCount:0,errorCount:4,sampleLimit:5000,truncated:false,since,
+    topErrors:[{providerName:'Bad\\nProvider',eventId:2,count:8}]}});
+  assert.equal(bad.events.state,'ok');
+  assert.equal(bad.events.topErrors,undefined);
+});
+
+test('Windows 보안 센터 백신 등록은 보호 활성 판정이 아니다', () => {
+  const m=normalizeWindowsStatus({avProducts:{state:'ok',source:'windows-security-center',
+    productNames:['AhnLab V3 Lite','Windows Defender'],truncated:false,productState:266240,username:'secret'}});
+  assert.deepEqual(m.avProducts,{state:'ok',source:'windows-security-center',
+    productNames:['AhnLab V3 Lite','Windows Defender'],truncated:false});
+  const display=pcMetricText('avProducts',m.avProducts);
+  assert.match(display.text,/AhnLab V3 Lite/);
+  assert.match(display.note,/등록만으로/);
+  assert.equal(JSON.stringify(m).includes('secret'),false);
+  assert.equal(JSON.stringify(m).includes('266240'),false);
+  const invalid=normalizeWindowsStatus({avProducts:{state:'ok',source:'windows-security-center',
+    productNames:['AhnLab V3 Lite','AhnLab V3 Lite'],truncated:false}});
+  assert.equal(invalid.avProducts.state,'unavailable');
+  const denied=normalizeWindowsStatus({avProducts:{state:'unavailable',reason:'permission_denied'}});
+  assert.equal(denied.avProducts.reason,'permission_denied');
 });
