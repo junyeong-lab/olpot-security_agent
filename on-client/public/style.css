@@ -277,7 +277,8 @@ main:focus { outline: none; }
 #pc-status .pc-summary-card .muted { margin: 0; }
 #pc-status .pc-summary-card[data-state="attention"] .pc-summary-value { color: var(--challenge); }
 #pc-status .pc-details { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-#pc-status .pc-details > h3 { margin: 0 0 12px; font-weight: 650; color: var(--text); }
+#pc-status .pc-details > summary { cursor: pointer; color: var(--accent); font-weight: 650; padding: 8px 0; }
+#pc-status .pc-details > summary:focus-visible { box-shadow: var(--focus); }
 #pc-status .pc-details .pc-metrics { margin-top: 10px; }
 @media (max-width: 600px) {
   #pc-status .pc-summary { grid-template-columns: minmax(0, 1fr); }
