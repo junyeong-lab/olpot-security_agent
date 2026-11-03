@@ -268,3 +268,27 @@ main:focus { outline: none; }
   .identity dd, .kv dd { margin-bottom: 6px; }
   .art-explain { float: none; margin: 0 0 8px; }
 }
+
+/* 직원용 첫 화면: 기능을 삭제하지 않고 진단·실습 요소를 접어 둔다. 권한 통제가 아닌 화면 표현이다. */
+body:not(.show-tech) .tech-only,
+body:not(.show-tech) .card.student,
+body:not(.show-tech) .notice,
+body:not(.show-tech) .sidebar-note { display: none !important; }
+body:not(.show-tech) .card.provided > h2 > .tag { display: none; }
+body:not(.show-tech) .grid-2:has(> .card.student) { grid-template-columns: minmax(0, 1fr); }
+.sidebar-dev { margin: 20px 4px; padding-top: 12px; border-top: 1px solid var(--border); }
+.sidebar-dev summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+.sidebar-dev .btn { margin-top: 10px; width: 100%; }
+.sidebar-dev p { margin: 8px 0; }
+.employee-lead { margin: -8px 0 16px; }
+#pc-status .pc-summary { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+#pc-status .pc-summary-card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+#pc-status .pc-summary-value { margin: 8px 0; font-size: 1.1rem; font-weight: 650; overflow-wrap: anywhere; }
+#pc-status .pc-summary-card .muted { margin: 0; }
+#pc-status .pc-summary-card[data-state="attention"] .pc-summary-value { color: var(--challenge); }
+#pc-status .pc-details { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+#pc-status .pc-details > summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 8px 0; }
+#pc-status .pc-details .pc-metrics { margin-top: 10px; }
+@media (max-width: 600px) {
+  #pc-status .pc-summary { grid-template-columns: minmax(0, 1fr); }
+}
