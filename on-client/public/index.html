@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <title>케셰브 · ZTNA &amp; XDR</title>
+  <title>케셰브 · 업무용 보안 Agent</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/student/appearance.css">
   <script type="module" src="/app.js"></script>
@@ -17,7 +17,7 @@
     <div class="brand">
       <img id="brand-icon" class="alekov-art brand-icon" src="/assets/alekov/alekov-app-icon.webp" alt="" aria-hidden="true" width="32" height="32" draggable="false">
       <span class="brand-mark" id="brand-mark-fallback" aria-hidden="true" hidden>A</span>
-      <span class="brand-name"><span id="brand-title">케셰브</span> <small>ZTNA &amp; XDR 보안 Agent</small></span>
+      <span class="brand-name"><span id="brand-title">케셰브</span> <small>업무용 보안 Agent</small></span>
     </div>
     <div class="topbar-status">
       <span id="mode-badge" class="mode-badge" data-mode="loading" role="status" aria-live="polite">상태 확인 중</span>
@@ -47,10 +47,11 @@
 
       <section id="view-protection" class="view" role="tabpanel" aria-labelledby="tab-protection">
         <h1>보호 현황</h1>
+        <p class="muted employee-lead">업무에 필요한 PC 보안 정보를 먼저 확인할 수 있습니다.</p>
         <section id="pc-status" class="card provided" aria-label="내 PC 상태"></section>
         <section id="local-pc-notice" class="card provided local-pc-notice" data-testid="local-pc-notice" aria-labelledby="local-pc-notice-title" tabindex="-1" hidden>
-          <h2 id="local-pc-notice-title">내 PC 점검 모드 <span class="tag">제공 · 실행 안내</span></h2>
-          <p class="local-pc-lead">내 PC 상태는 확인할 수 있습니다. 계정·AI·SDP 연결은 이 실행에 포함되지 않았습니다. 위쪽 「내 PC 확인」부터 시작하세요.</p>
+          <h2 id="local-pc-notice-title">회사 연결 안내 <span class="tag">PC 전용 모드</span></h2>
+          <p class="local-pc-lead">현재 실행에서는 회사 서버와의 연결을 확인할 수 없습니다. 내 PC 조회는 가능하지만 업무 시스템 접근이 허용된 상태는 아닙니다.</p>
           <ol class="connect-steps">
             <li>위쪽 「내 PC 확인」을 눌러 CPU·메모리·디스크·네트워크·Windows 방화벽·Windows 기록과 Windows VPN·Defender·등록 백신 제품·로그인 이벤트 요약을 읽습니다. 타사 VPN 연결 상태와 백신 실제 보호 상태는 별도 확인이 필요합니다.</li>
             <li>계속 지켜보려면 「10초마다 확인」을 켭니다. 앱 탭이 보이는 동안에만 확인합니다.</li>
