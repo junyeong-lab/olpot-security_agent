@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createWindowsEventDetailsReader, normalizeWindowsEventDetails} from '../src/windows-event-details.mjs';
+import {validateWindowsEventResponse} from '../public/windows-events-view.mjs';
 
 const fixture = {
   state:'ok', source:'windows-event-log', hours:24, sampleLimit:200, truncated:false,
@@ -75,6 +76,11 @@ test('Windows에서는 24시간 경고·오류 로그만 제한 조회하고 응
   assert.equal(result.state,'ok');
   assert.equal(result.events.length,2);
   assert.equal(result.schema,'aleph.on.windows-events.v1');
+  assert.equal(result.source,'local-pc');
+  // 실제 리더 반환값을 화면의 검증기로 넘겨 API/화면 간 source 계약을 재검증한다.
+  const view=validateWindowsEventResponse({ok:true,data:result},Date.parse('2026-11-03T14:00:00Z'));
+  assert.ok(view,'서버 결과는 Windows 이벤트 화면의 응답 검증을 통과해야 한다');
+  assert.equal(view.events.length,2);
 });
 
 test('권한 오류·명령 실패·시간 초과는 정상 결과로 위장하지 않는다', async () => {
