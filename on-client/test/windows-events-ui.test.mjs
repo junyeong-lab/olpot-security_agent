@@ -66,3 +66,14 @@ test('기존 보안 기록 및 과제 화면을 유지하고 별도의 로컬 �
   assert.match(server,/pathname==='\/api\/pc\/events'/);
   assert.match(server,/'\/windows-events-view.mjs'/);
 });
+
+test('상세 버튼은 200건 목록 끝이 아니라 선택한 행 바로 아래에 상세를 펼친다',()=>{
+  const view=readFileSync(new URL('../public/windows-events-view.mjs',import.meta.url),'utf8');
+  assert.match(view,/button\.setAttribute\('aria-expanded',selected===key\?'true':'false'\)/);
+  assert.match(view,/if\(selected===key\)\{/);
+  assert.match(view,/detailCell\.append\(detail\(row\)\)/);
+  assert.match(view,/body\.append\(detailRow\)/);
+  assert.match(view,/selected=selected===key\?null:key/);
+  assert.match(view,/scrollIntoView/);
+  assert.doesNotMatch(view,/panel\.append\(filters,counters,recurring,tableWrap,details,notice\)/);
+});
