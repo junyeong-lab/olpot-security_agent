@@ -23,7 +23,28 @@ export function pcMetricText(key, metric) {
   } else if (key === 'firewall' && Array.isArray(metric.profiles) && metric.profiles.length === 3 && ['Domain', 'Private', 'Public'].every(name => metric.profiles.some(p => p.name === name && typeof p.enabled === 'boolean'))) {
     text = metric.profiles.map(p => `${p.name} ${p.enabled ? '켜짐' : '꺼짐'}`).join(' · '); note = 'Windows 방화벽 설정을 읽었습니다. 앱이 설정을 바꾸지 않습니다. 보호 전체의 안전 판정은 아닙니다.';
   } else if (key === 'events' && counter(metric.warningCount) && counter(metric.errorCount) && metric.warningCount + metric.errorCount <= 5000 && metric.sampleLimit === 5000 && typeof metric.truncated === 'boolean') {
-    text = `최근 24시간 경고 ${metric.warningCount}건 · 오류 ${metric.errorCount}건${metric.truncated ? ' (일부 집계)' : ''}`; note = 'System·Application 기록을 최대 5,000건까지 읽습니다. 오류 건수는 침해 사고 판정이 아닙니다.';
+    text = `최근 24시간 경고 ${metric.warningCount}건 · 오류 ${metric.errorCount}건${metric.truncated ? ' (일부 집계)' : ''}`;
+    const top = Array.isArray(metric.topErrors) && metric.topErrors.length && metric.topErrors[0];
+    note = top && typeof top.providerName === 'string' && counter(top.eventId) && counter(top.count) && top.count <= metric.errorCount
+      ? `주요 반복 오류: ${top.providerName} (이벤트 ${top.eventId}) ${top.count}건. System·Application 최대 5,000건 표본이며 침해 사고 판정이 아닙니다.`
+      : 'System·Application 기록을 최대 5,000건까지 읽습니다. 오류 건수는 침해 사고 판정이 아닙니다.';
+  } else if (key === 'vpn' && metric.scope === 'current-user-windows-vpn' && counter(metric.configuredCount) && counter(metric.connectedCount) && metric.connectedCount <= metric.configuredCount) {
+    text = `Windows VPN 연결 ${metric.connectedCount}개 / 등록 ${metric.configuredCount}개`;
+    note = '현재 사용자의 Windows 내장 VPN만 확인했습니다. OpenVPN 등 타사 VPN 및 VPN 서버 접속 성공 여부는 별도 확인이 필요합니다.';
+  } else if (key === 'antivirus' && metric.provider === 'microsoft-defender' && typeof metric.realtimeEnabled === 'boolean') {
+    text = `Microsoft Defender 실시간 보호 ${metric.realtimeEnabled ? '켜짐' : '꺼짐'}`;
+    note = 'Microsoft Defender만 확인했습니다. 타사 백신 보호 여부나 PC 전체의 안전을 판정하지 않습니다.';
+  } else if (key === 'avProducts' && metric.source === 'windows-security-center' &&
+    Array.isArray(metric.productNames) && metric.productNames.length <= 8 &&
+    metric.productNames.every(name => typeof name === 'string' && name.length > 0 && name.length <= 100) &&
+    typeof metric.truncated === 'boolean') {
+    text = metric.productNames.length
+      ? `등록 백신 ${metric.productNames.length}종: ${metric.productNames.join(' · ')}${metric.truncated ? ' 외' : ''}`
+      : '등록된 백신 제품 확인되지 않음';
+    note = 'Windows 보안 센터에 등록된 제품명입니다. 등록만으로 실시간 보호·업데이트·안전을 판단할 수 없습니다. 실제 보호 상태는 Windows 보안에서 확인하세요.';
+  } else if (key === 'signins' && counter(metric.successCount) && counter(metric.failureCount) && metric.successCount + metric.failureCount <= 1000 && metric.sampleLimit === 1000 && typeof metric.truncated === 'boolean') {
+    text = `최근 24시간 로그인 성공 ${metric.successCount}건 · 실패 ${metric.failureCount}건${metric.truncated ? ' (일부 집계)' : ''}`;
+    note = 'Windows Security 4624·4625의 대화형 로그인 표본 최대 1,000건입니다. 사용자 정보·IP·로그 본문은 표시하지 않습니다. 감사 정책·접근 권한에 따라 일부 기록이 없을 수 있습니다.';
   }
   return text ? {text, note, state: 'measured'} : {text: '확인 불가', note: '응답의 값이나 단위를 확인할 수 없습니다. 정상으로 판단하지 마세요.', state: 'unavailable'};
 }
@@ -39,7 +60,7 @@ export function mountPcStatus(host, {fetchImpl = globalThis.fetch?.bind(globalTh
   const status = make('p', '아직 조회하지 않았습니다.', 'muted'); status.setAttribute('role', 'status');
   const grid = make('div', '', 'pc-metrics');
   const rows = new Map();
-  for (const [key, title] of Object.entries({cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', firewall: 'Windows 방화벽', events: 'Windows 기록'})) {
+  for (const [key, title] of Object.entries({cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', firewall: 'Windows 방화벽', events: 'Windows 기록', vpn: 'Windows VPN', antivirus: 'Microsoft Defender', avProducts: '등록된 백신', signins: 'Windows 로그인 기록'})) {
     const article = make('article', '', 'pc-metric'), value = make('p', '아직 조회하지 않음', 'pc-value'), note = make('p', '', 'muted');
     article.append(make('h3', title), value, note); grid.append(article); rows.set(key, {article, value, note});
   }
