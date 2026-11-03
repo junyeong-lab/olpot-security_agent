@@ -34,7 +34,16 @@ try {
   }
   $truncated = $events.Count -gt 5000
   $sample = @($events | Sort-Object -Property TimeCreated -Descending | Select-Object -First 5000)
-  $result.events = @{ state = 'ok'; warningCount = @($sample | Where-Object { $_.Level -eq 3 }).Count; errorCount = @($sample | Where-Object { $_.Level -eq 2 }).Count; truncated = $truncated; sampleLimit = 5000; since = $since.ToUniversalTime().ToString('o') }
+  # Only aggregate error provider, event ID and count; do not return event message or identity.
+  $topErrors = @($sample | Where-Object { $_.Level -eq 2 } |
+    Group-Object -Property ProviderName, Id |
+    Sort-Object -Property Count -Descending |
+    Select-Object -First 3 |
+    ForEach-Object {
+      $entry = $_.Group[0]
+      @{ providerName = [string]$entry.ProviderName; eventId = [int]$entry.Id; count = [int]$_.Count }
+    })
+  $result.events = @{ state = 'ok'; warningCount = @($sample | Where-Object { $_.Level -eq 3 }).Count; errorCount = @($sample | Where-Object { $_.Level -eq 2 }).Count; topErrors = @($topErrors); truncated = $truncated; sampleLimit = 5000; since = $since.ToUniversalTime().ToString('o') }
 } catch {
   $result.events = @{ state = 'unavailable'; reason = (Read-FailureReason $_) }
 }
@@ -51,6 +60,14 @@ try {
     $result.antivirus = @{ state = 'ok'; provider = 'microsoft-defender'; realtimeEnabled = [bool]$defender.RealTimeProtectionEnabled }
   } else { $result.antivirus = @{ state = 'unavailable'; reason = 'query_failed' } }
 } catch { $result.antivirus = @{ state = 'unavailable'; reason = (Read-FailureReason $_) } }
+# Names of Windows Security Center registered antivirus products only.
+# Registration alone does not prove active protection; productState is intentionally not interpreted.
+try {
+  $registered = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName 'AntiVirusProduct' -ErrorAction Stop |
+    Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.displayName) } |
+    ForEach-Object { [string]$_.displayName } | Sort-Object -Unique)
+  $result.avProducts = @{ state = 'ok'; source = 'windows-security-center'; productNames = @($registered | Select-Object -First 8); truncated = ($registered.Count -gt 8) }
+} catch { $result.avProducts = @{ state = 'unavailable'; reason = (Read-FailureReason $_) } }
 # Count Security 4624/4625 interactive sign-ins, max 1000 sampled events. No identities or event bodies are returned.
 try {
   $security = @()
@@ -91,7 +108,7 @@ export function cpuUsage(before, after) {
   return {state: 'ok', usagePercent: Math.round(1000 * (1 - (b.idle - a.idle) / (b.total - a.total))) / 10};
 }
 export function normalizeWindowsStatus(raw) {
-  const result = {firewall: missing('invalid_response'), events: missing('invalid_response'), vpn: missing('invalid_response'), antivirus: missing('invalid_response'), signins: missing('invalid_response')};
+  const result = {firewall: missing('invalid_response'), events: missing('invalid_response'), vpn: missing('invalid_response'), antivirus: missing('invalid_response'), avProducts: missing('invalid_response'), signins: missing('invalid_response')};
   if (raw?.firewall?.state === 'unavailable') result.firewall = missing(raw.firewall.reason === 'permission_denied' ? 'permission_denied' : 'query_failed');
   const profiles = raw?.firewall?.profiles;
   if (raw?.firewall?.state === 'ok' && Array.isArray(profiles) && profiles.length === 3 && ['Domain', 'Private', 'Public'].every(name => profiles.some(p => p.name === name && typeof p.enabled === 'boolean'))) {
@@ -103,6 +120,16 @@ export function normalizeWindowsStatus(raw) {
     result.events = {state: 'ok', warningCount: e.warningCount, errorCount: e.errorCount, truncated: e.truncated, sampleLimit: 5000, since: e.since};
   }
 
+  // Invalid group details must not invalidate accurate overall event counts.
+  const groups = e?.topErrors;
+  if (result.events.state === 'ok' && Array.isArray(groups) && groups.length <= 3 &&
+    groups.every(v => typeof v?.providerName === 'string' && v.providerName.length >= 1 &&
+      v.providerName.length <= 120 && !/[\x00-\x1f\x7f<>]/.test(v.providerName) &&
+      Number.isSafeInteger(v.eventId) && v.eventId >= 0 && Number.isSafeInteger(v.count) && v.count > 0) &&
+    groups.reduce((sum, v) => sum + v.count, 0) <= result.events.errorCount) {
+    result.events.topErrors = groups.map(v => ({providerName: v.providerName, eventId: v.eventId, count: v.count}));
+  }
+
   const failure = item => missing(item?.reason === 'permission_denied' ? 'permission_denied' : 'query_failed');
   if (raw?.vpn?.state === 'unavailable') result.vpn = failure(raw.vpn);
   if (raw?.vpn?.state === 'ok' && raw.vpn.scope === 'current-user-windows-vpn' && count(raw.vpn.configuredCount) && count(raw.vpn.connectedCount) && raw.vpn.connectedCount <= raw.vpn.configuredCount) {
@@ -111,6 +138,16 @@ export function normalizeWindowsStatus(raw) {
   if (raw?.antivirus?.state === 'unavailable') result.antivirus = failure(raw.antivirus);
   if (raw?.antivirus?.state === 'ok' && raw.antivirus.provider === 'microsoft-defender' && typeof raw.antivirus.realtimeEnabled === 'boolean') {
     result.antivirus = {state: 'ok', provider: 'microsoft-defender', realtimeEnabled: raw.antivirus.realtimeEnabled};
+  }
+  if (raw?.avProducts?.state === 'unavailable') result.avProducts = failure(raw.avProducts);
+  const products = raw?.avProducts;
+  if (products?.state === 'ok' && products.source === 'windows-security-center' &&
+    Array.isArray(products.productNames) && products.productNames.length <= 8 &&
+    typeof products.truncated === 'boolean' &&
+    products.productNames.every(name => typeof name === 'string' && name.length >= 1 &&
+      name.length <= 100 && name.trim() === name && !/[\x00-\x1f\x7f<>]/.test(name)) &&
+    new Set(products.productNames).size === products.productNames.length) {
+    result.avProducts = {state: 'ok', source: 'windows-security-center', productNames: [...products.productNames], truncated: products.truncated};
   }
   if (raw?.signins?.state === 'unavailable') result.signins = failure(raw.signins);
   const v = raw?.signins;
@@ -142,14 +179,14 @@ export function createPcStatusReader({system = os, disk = statfs, run = execute,
       catch {metrics.disk = missing('query_failed');}
     })();
     const windows = (async () => {
-      if (platform !== 'win32') {for (const key of ['firewall','events','vpn','antivirus','signins']) metrics[key] = missing('unsupported'); return;}
+      if (platform !== 'win32') {for (const key of ['firewall','events','vpn','antivirus','avProducts','signins']) metrics[key] = missing('unsupported'); return;}
       try {
         const exe = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
         const {stdout} = await run(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_READ], {windowsHide: true, encoding: 'utf8', timeout: 8000, maxBuffer: 128 * 1024, signal});
         Object.assign(metrics, normalizeWindowsStatus(JSON.parse(stdout.trim())));
       } catch (error) {
         const reason = signal?.aborted ? 'cancelled' : error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'query_failed' : error?.killed || error?.code === 'ETIMEDOUT' ? 'timeout' : 'query_failed';
-        for (const key of ['firewall','events','vpn','antivirus','signins']) metrics[key] = missing(reason);
+        for (const key of ['firewall','events','vpn','antivirus','avProducts','signins']) metrics[key] = missing(reason);
       }
     })();
     await Promise.all([cpu, drive, windows]); signal?.throwIfAborted();
