@@ -38,6 +38,38 @@ try {
 } catch {
   $result.events = @{ state = 'unavailable'; reason = (Read-FailureReason $_) }
 }
+
+# Current user's Windows built-in VPN only. Third-party VPNs are out of scope.
+try {
+  $vpnProfiles = @(Get-VpnConnection -ErrorAction Stop)
+  $result.vpn = @{ state = 'ok'; scope = 'current-user-windows-vpn'; configuredCount = $vpnProfiles.Count; connectedCount = @($vpnProfiles | Where-Object { $_.ConnectionStatus -eq 'Connected' }).Count }
+} catch { $result.vpn = @{ state = 'unavailable'; reason = (Read-FailureReason $_) } }
+# Microsoft Defender only; do not infer third-party antivirus status.
+try {
+  $defender = Get-MpComputerStatus -ErrorAction Stop
+  if ($null -ne $defender -and $defender.RealTimeProtectionEnabled -is [bool]) {
+    $result.antivirus = @{ state = 'ok'; provider = 'microsoft-defender'; realtimeEnabled = [bool]$defender.RealTimeProtectionEnabled }
+  } else { $result.antivirus = @{ state = 'unavailable'; reason = 'query_failed' } }
+} catch { $result.antivirus = @{ state = 'unavailable'; reason = (Read-FailureReason $_) } }
+# Count Security 4624/4625 interactive sign-ins, max 1000 sampled events. No identities or event bodies are returned.
+try {
+  $security = @()
+  try { $security = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = @(4624,4625); StartTime = $since } -MaxEvents 1001 -ErrorAction Stop) }
+  catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }
+  $sample = @($security | Select-Object -First 1000)
+  $success = 0
+  $failure = 0
+  foreach ($entry in $sample) {
+    $typeIndex = if ($entry.Id -eq 4624) { 8 } else { 10 }
+    if ($null -eq $entry.Properties -or $entry.Properties.Count -le $typeIndex) { throw 'EventSchemaUnsupported' }
+    $logonType = [string]$entry.Properties[$typeIndex].Value
+    if ($logonType -in @('2','7','10','11')) {
+      if ($entry.Id -eq 4624) { $success++ }
+      elseif ($entry.Id -eq 4625) { $failure++ }
+    }
+  }
+  $result.signins = @{ state = 'ok'; successCount = $success; failureCount = $failure; truncated = ($security.Count -gt 1000); sampleLimit = 1000; since = $since.ToUniversalTime().ToString('o') }
+} catch { $result.signins = @{ state = 'unavailable'; reason = (Read-FailureReason $_) } }
 $result | ConvertTo-Json -Depth 5 -Compress
 `;
 const missing = reason => ({state: 'unavailable', reason});
@@ -59,7 +91,7 @@ export function cpuUsage(before, after) {
   return {state: 'ok', usagePercent: Math.round(1000 * (1 - (b.idle - a.idle) / (b.total - a.total))) / 10};
 }
 export function normalizeWindowsStatus(raw) {
-  const result = {firewall: missing('invalid_response'), events: missing('invalid_response')};
+  const result = {firewall: missing('invalid_response'), events: missing('invalid_response'), vpn: missing('invalid_response'), antivirus: missing('invalid_response'), signins: missing('invalid_response')};
   if (raw?.firewall?.state === 'unavailable') result.firewall = missing(raw.firewall.reason === 'permission_denied' ? 'permission_denied' : 'query_failed');
   const profiles = raw?.firewall?.profiles;
   if (raw?.firewall?.state === 'ok' && Array.isArray(profiles) && profiles.length === 3 && ['Domain', 'Private', 'Public'].every(name => profiles.some(p => p.name === name && typeof p.enabled === 'boolean'))) {
@@ -69,6 +101,21 @@ export function normalizeWindowsStatus(raw) {
   if (e?.state === 'unavailable') result.events = missing(e.reason === 'permission_denied' ? 'permission_denied' : 'query_failed');
   if (e?.state === 'ok' && count(e.warningCount) && count(e.errorCount) && e.warningCount + e.errorCount <= 5000 && e.sampleLimit === 5000 && typeof e.truncated === 'boolean' && typeof e.since === 'string' && Number.isFinite(Date.parse(e.since))) {
     result.events = {state: 'ok', warningCount: e.warningCount, errorCount: e.errorCount, truncated: e.truncated, sampleLimit: 5000, since: e.since};
+  }
+
+  const failure = item => missing(item?.reason === 'permission_denied' ? 'permission_denied' : 'query_failed');
+  if (raw?.vpn?.state === 'unavailable') result.vpn = failure(raw.vpn);
+  if (raw?.vpn?.state === 'ok' && raw.vpn.scope === 'current-user-windows-vpn' && count(raw.vpn.configuredCount) && count(raw.vpn.connectedCount) && raw.vpn.connectedCount <= raw.vpn.configuredCount) {
+    result.vpn = {state: 'ok', scope: 'current-user-windows-vpn', configuredCount: raw.vpn.configuredCount, connectedCount: raw.vpn.connectedCount};
+  }
+  if (raw?.antivirus?.state === 'unavailable') result.antivirus = failure(raw.antivirus);
+  if (raw?.antivirus?.state === 'ok' && raw.antivirus.provider === 'microsoft-defender' && typeof raw.antivirus.realtimeEnabled === 'boolean') {
+    result.antivirus = {state: 'ok', provider: 'microsoft-defender', realtimeEnabled: raw.antivirus.realtimeEnabled};
+  }
+  if (raw?.signins?.state === 'unavailable') result.signins = failure(raw.signins);
+  const v = raw?.signins;
+  if (v?.state === 'ok' && count(v.successCount) && count(v.failureCount) && v.successCount + v.failureCount <= 1000 && v.sampleLimit === 1000 && typeof v.truncated === 'boolean' && typeof v.since === 'string' && Number.isFinite(Date.parse(v.since))) {
+    result.signins = {state: 'ok', successCount: v.successCount, failureCount: v.failureCount, truncated: v.truncated, sampleLimit: 1000, since: v.since};
   }
   return result;
 }
@@ -95,14 +142,14 @@ export function createPcStatusReader({system = os, disk = statfs, run = execute,
       catch {metrics.disk = missing('query_failed');}
     })();
     const windows = (async () => {
-      if (platform !== 'win32') {metrics.firewall = missing('unsupported'); metrics.events = missing('unsupported'); return;}
+      if (platform !== 'win32') {for (const key of ['firewall','events','vpn','antivirus','signins']) metrics[key] = missing('unsupported'); return;}
       try {
         const exe = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
         const {stdout} = await run(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_READ], {windowsHide: true, encoding: 'utf8', timeout: 8000, maxBuffer: 128 * 1024, signal});
         Object.assign(metrics, normalizeWindowsStatus(JSON.parse(stdout.trim())));
       } catch (error) {
         const reason = signal?.aborted ? 'cancelled' : error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'query_failed' : error?.killed || error?.code === 'ETIMEDOUT' ? 'timeout' : 'query_failed';
-        metrics.firewall = missing(reason); metrics.events = missing(reason);
+        for (const key of ['firewall','events','vpn','antivirus','signins']) metrics[key] = missing(reason);
       }
     })();
     await Promise.all([cpu, drive, windows]); signal?.throwIfAborted();
