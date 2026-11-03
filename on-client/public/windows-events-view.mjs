@@ -43,6 +43,19 @@ export function filterWindowsEvents(events, {query = '', level = 'all', channel 
       .some(s => s.toLocaleLowerCase('ko-KR').includes(search))));
 }
 
+export function recurringWindowsEvents(events, limit = 5) {
+  const grouped = new Map();
+  for (const event of events) {
+    const key = event.channel + ':' + event.eventId + ':' + event.provider;
+    const current = grouped.get(key);
+    if (current) current.count++;
+    else grouped.set(key,{channel:event.channel,eventId:event.eventId,
+      provider:event.provider,count:1});
+  }
+  return [...grouped.values()].sort((a,b)=>b.count-a.count ||
+    a.eventId-b.eventId || a.provider.localeCompare(b.provider)).slice(0,limit);
+}
+
 function csvCell(value) {
   const raw = String(value);
   // Excel/스프레드시트 수식 실행 방지. 큰따옴표와 쉼표도 CSV 규약에 따라 인용한다.
@@ -92,6 +105,7 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
   }
   filters.append(search,level,channel);
   const counters=make('p','','win-event-counts'); counters.setAttribute('role','status');
+  const recurring=make('section','','win-event-recurring');
   const tableWrap=make('div','','win-event-table-wrap');
   const table=make('table','','win-event-table');
   const head=make('thead'),header=make('tr');
@@ -105,7 +119,7 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
   details.setAttribute('aria-label','선택한 이벤트 세부 정보');
   details.append(make('p','행의 「상세」를 누르면 해당 이벤트의 메타데이터가 표시됩니다.','muted'));
   const notice=make('p','이벤트 수준이 오류라도 침해 사고나 악성 행위로 단정할 수 없습니다. 원인 분석에는 관련 시스템 맥락을 추가 확인해야 합니다.','muted');
-  panel.append(filters,counters,tableWrap,details,notice);
+  panel.append(filters,counters,recurring,tableWrap,details,notice);
   host.replaceChildren(heading,intro,toolbar,status,panel);
   let data=null, selected=null, controller=null, generation=0, disposed=false;
 
@@ -129,6 +143,14 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
     counters.textContent='조회 표본 '+data.events.length+'건 (오류 '+errors+' · 경고 '+warnings+') · 필터 결과 '+events.length+'건'+
       (data.truncated?' · 일부 기록만 조회됨':'')+' · 마지막 조회 '+new Date(data.measuredAt).toLocaleString('ko-KR');
     exportBtn.disabled=events.length===0;
+    const top = recurringWindowsEvents(data.events);
+    const topHeading=make('h3','반복 이벤트 TOP 5 · 조회 표본 기준');
+    const topList=make('ol','','win-event-top');
+    for(const entry of top){
+      topList.append(make('li','이벤트 '+entry.eventId+' · '+entry.provider+
+        ' ('+entry.channel+') — '+entry.count+'건'));
+    }
+    recurring.replaceChildren(topHeading,topList);
     body.replaceChildren();
     if (events.length===0) {
       const tr=make('tr'),td=make('td','조건에 맞는 이벤트가 없습니다.');td.colSpan=6;
