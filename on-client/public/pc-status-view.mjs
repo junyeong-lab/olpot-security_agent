@@ -49,26 +49,77 @@ export function pcMetricText(key, metric) {
   return text ? {text, note, state: 'measured'} : {text: '확인 불가', note: '응답의 값이나 단위를 확인할 수 없습니다. 정상으로 판단하지 마세요.', state: 'unavailable'};
 }
 
+// 직원에게 필요한 요약만 제공한다. Windows 백신 등록과 서버 연결을 안전/승인 판정으로 바꾸지 않는다.
+export function employeePcSummary(metrics = {}) {
+  const av = metrics.avProducts;
+  let antivirus = {text: '보호 상태 확인 필요', note: 'Windows 보안에서 백신의 실제 보호 상태를 확인하세요.', state: 'unavailable'};
+  if (av?.state === 'ok' && av.source === 'windows-security-center' && Array.isArray(av.productNames) && av.productNames.length > 0) {
+    const names = av.productNames.filter(v => typeof v === 'string' && v.length > 0).slice(0, 2);
+    if (names.length) antivirus = {
+      text: `${names.join(' · ')}${av.productNames.length > 2 || av.truncated ? ' 외' : ''} 등록`,
+      note: '등록 정보만 확인했습니다. 백신이 실제로 보호 중인지는 Windows 보안에서 확인하세요.',
+      state: 'measured'
+    };
+  } else if (metrics.antivirus?.state === 'ok' && metrics.antivirus.provider === 'microsoft-defender' && metrics.antivirus.realtimeEnabled === true) {
+    antivirus = {text: 'Microsoft Defender 실시간 보호 켜짐', note: 'Defender 조회 결과이며 PC 전체의 안전 판정은 아닙니다.', state: 'measured'};
+  }
+  const profiles = metrics.firewall?.profiles;
+  let firewall = {text: '방화벽 설정 확인 필요', note: '방화벽 상태를 읽지 못했습니다.', state: 'unavailable'};
+  if (metrics.firewall?.state === 'ok' && Array.isArray(profiles) && profiles.length === 3 && ['Domain','Private','Public'].every(name => profiles.some(p => p.name === name && typeof p.enabled === 'boolean'))) {
+    firewall = profiles.every(p => p.enabled)
+      ? {text: 'Windows 방화벽 켜짐', note: '3개 프로필 설정 확인. 전체 보안 상태 판정은 아닙니다.', state: 'measured'}
+      : {text: '방화벽 설정 점검 필요', note: '꺼진 프로필이 있습니다. IT 담당자에게 문의하세요.', state: 'attention'};
+  }
+  let storage = {text: '저장 공간 확인 필요', note: '디스크 조회 결과가 없습니다.', state: 'unavailable'};
+  const disk = metrics.disk;
+  if (disk?.state === 'ok' && number(disk.totalBytes) && disk.totalBytes > 0 && number(disk.freeBytes) && disk.freeBytes <= disk.totalBytes) {
+    storage = disk.freeBytes / disk.totalBytes < 0.1
+      ? {text: `${bytes(disk.freeBytes)} 남음`, note: '저장 공간이 부족할 수 있습니다. 업무 파일을 임의 삭제하지 마세요.', state: 'attention'}
+      : {text: `${bytes(disk.freeBytes)} 남음`, note: '이 앱이 있는 디스크의 여유 공간입니다.', state: 'measured'};
+  }
+  const connection = {text: '회사 연결 별도 확인', note: 'VPN 프로필 개수만으로 ZTNA·업무 시스템 접속을 판단하지 않습니다. 상단 연결 상태를 확인하세요.', state: 'unavailable'};
+  return {antivirus, firewall, connection, storage};
+}
+
 export function mountPcStatus(host, {fetchImpl = globalThis.fetch?.bind(globalThis), intervalMs = 10000, timeoutMs = 10000} = {}) {
   const doc = host.ownerDocument, win = doc.defaultView;
   const make = (tag, text, cls) => {const node = doc.createElement(tag); if (text) node.textContent = text; if (cls) node.className = cls; return node;};
-  const heading = make('h2', '내 PC 상태');
-  const intro = make('p', '이 앱을 실행한 PC의 값을 읽습니다. 제공된 조회 기능이며 학생 구현 성취와 구분합니다. 이 결과는 AI나 외부 서버로 자동 전송하지 않습니다.', 'muted');
+  const heading = make('h2', '내 PC 보안 상태');
+  const intro = make('p', '회사 업무에 필요한 기본 상태를 먼저 확인합니다. 확인되지 않은 항목은 정상으로 판단하지 않습니다. PC 조회 결과는 AI나 외부 서버로 자동 전송하지 않습니다.', 'muted');
   const refresh = make('button', '내 PC 확인', 'btn'); refresh.type = 'button';
   const label = make('label', '', 'pc-auto'); const auto = doc.createElement('input'); auto.type = 'checkbox';
   label.append(auto, doc.createTextNode(' 10초마다 확인 (앱 탭이 보이는 동안)'));
   const status = make('p', '아직 조회하지 않았습니다.', 'muted'); status.setAttribute('role', 'status');
+  const summaryGrid = make('div', '', 'pc-summary');
+  const summaryRows = new Map();
+  for (const [key, title] of Object.entries({antivirus:'백신',firewall:'방화벽',connection:'회사 연결',storage:'저장 공간'})) {
+    const article=make('article','','pc-summary-card');
+    const label=make('h3',title);
+    const value=make('p','아직 확인하지 않음','pc-summary-value');
+    const note=make('p','「내 PC 확인」을 눌러 주세요.','muted');
+    article.append(label,value,note); summaryGrid.append(article);
+    summaryRows.set(key,{article,value,note});
+  }
+  const details=doc.createElement('details');
+  details.className='pc-details';
+  details.append(make('summary','상세 PC 진단 보기 (IT 지원용)'));
   const grid = make('div', '', 'pc-metrics');
   const rows = new Map();
   for (const [key, title] of Object.entries({cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', firewall: 'Windows 방화벽', events: 'Windows 기록', vpn: 'Windows VPN', antivirus: 'Microsoft Defender', avProducts: '등록된 백신', signins: 'Windows 로그인 기록'})) {
     const article = make('article', '', 'pc-metric'), value = make('p', '아직 조회하지 않음', 'pc-value'), note = make('p', '', 'muted');
     article.append(make('h3', title), value, note); grid.append(article); rows.set(key, {article, value, note});
   }
-  host.replaceChildren(heading, intro, refresh, label, status, grid);
+  details.append(grid);
+  host.replaceChildren(heading, intro, refresh, label, status, summaryGrid, details);
   let disposed = false, controller = null, generation = 0, timer = null;
   function stopTimer() {if (timer !== null) win.clearTimeout(timer); timer = null;}
   function next() {stopTimer(); if (!disposed && auto.checked && !doc.hidden) timer = win.setTimeout(() => {void read();}, Math.max(10000, intervalMs));}
-  function unavailable() {for (const row of rows.values()) {row.article.dataset.state = 'unavailable'; row.value.textContent = '이번 조회 확인 불가'; row.note.textContent = '이전 값을 현재 상태로 표시하지 않습니다.';}}
+  function unavailable() {
+    for (const row of [...rows.values(), ...summaryRows.values()]) {
+      row.article.dataset.state='unavailable'; row.value.textContent='이번 조회 확인 불가';
+      row.note.textContent='이전 값을 현재 상태로 표시하지 않습니다.';
+    }
+  }
   async function read() {
     if (disposed || doc.hidden) return;
     stopTimer(); controller?.abort(); const own = ++generation, abort = new AbortController(); controller = abort;
@@ -88,6 +139,11 @@ export function mountPcStatus(host, {fetchImpl = globalThis.fetch?.bind(globalTh
       for (const [key, row] of rows) {
         const info = pcMetricText(key, data.metrics?.[key]);
         row.article.dataset.state = info.state; row.value.textContent = info.text; row.note.textContent = info.note;
+      }
+      const employee = employeePcSummary(data.metrics);
+      for (const [key, row] of summaryRows) {
+        const info = employee[key];
+        row.article.dataset.state=info.state; row.value.textContent=info.text; row.note.textContent=info.note;
       }
       status.textContent = `이 PC 마지막 실측 · ${new Date(measured).toLocaleString('ko-KR')} · 보안 서버 연결 상태와 별도`;
     } catch {
