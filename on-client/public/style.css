@@ -310,3 +310,11 @@ main:focus { outline: none; }
 #windows-event-analysis .win-event-recurring h3 { font-size: .95rem; margin: 0 0 8px; }
 #windows-event-analysis .win-event-top { margin: 0; padding-left: 22px; font-size: .88rem; overflow-wrap: anywhere; }
 #windows-event-analysis .win-event-top li { margin: 4px 0; }
+
+/* 각 이벤트의 상세 내역은 선택한 행 바로 아래에서 열린다. */
+#windows-event-analysis .win-event-detail-row > td {
+  padding: 10px 8px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+#windows-event-analysis .win-event-detail-row .win-event-detail { margin: 0; }
