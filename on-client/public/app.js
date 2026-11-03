@@ -3,6 +3,7 @@
 // 기존 연결의 자동 재시도 없음. 로컬 PC 조회의 주기적 확인은 학생이 직접 선택한다.
 import { normalizeScan, createVulnerabilitiesView } from '/vulnerabilities-view.mjs';
 import {mountPcStatus} from '/pc-status-view.mjs';
+import {mountWindowsEventAnalysis} from '/windows-events-view.mjs';
 
 const STUDENT_MODULE = '/student/extension.mjs';
 const STUDENT_PENDING = '학생 구현 대기';
@@ -1483,6 +1484,8 @@ async function loadAll() {
 function init() {
   const pcHost = document.getElementById('pc-status');
   if (pcHost) mountPcStatus(pcHost);
+  const windowsEventsHost = document.getElementById('windows-event-analysis');
+  if (windowsEventsHost) mountWindowsEventAnalysis(windowsEventsHost);
   setupNav();
   $('refresh').addEventListener('click', () => loadAll());
   $('diag-load').addEventListener('click', () => loadDiagnostics());

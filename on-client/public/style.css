@@ -283,3 +283,38 @@ main:focus { outline: none; }
 @media (max-width: 600px) {
   #pc-status .pc-summary { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* 보안 기록 > Windows 이벤트 분석 (원문이나 계정 정보를 표시하지 않는 메타데이터 뷰) */
+#windows-event-analysis .win-event-toolbar,
+#windows-event-analysis .win-event-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+#windows-event-analysis .win-event-search { flex: 1 1 220px; min-width: 0; }
+#windows-event-analysis input,
+#windows-event-analysis select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
+#windows-event-analysis .win-event-counts { margin: 12px 0; font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
+#windows-event-analysis .win-event-table-wrap { width: 100%; overflow-x: auto; }
+#windows-event-analysis .win-event-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+#windows-event-analysis .win-event-table th,
+#windows-event-analysis .win-event-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+#windows-event-analysis .win-event-table th { background: var(--bg); white-space: nowrap; }
+#windows-event-analysis .win-event-table tr[data-selected="true"] { background: var(--accent-soft); }
+#windows-event-analysis .win-event-detail-btn { white-space: nowrap; padding: 5px 9px; }
+#windows-event-analysis .win-event-detail { margin-top: 16px; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+#windows-event-analysis .win-event-detail h3 { margin-bottom: 10px; }
+#windows-event-analysis .win-event-kv { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
+#windows-event-analysis .win-event-kv dt { color: var(--muted); }
+#windows-event-analysis .win-event-kv dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: .9rem; }
+@media(max-width:600px) { #windows-event-analysis .win-event-kv { grid-template-columns: 1fr; } }
+
+#windows-event-analysis .win-event-recurring { margin: 14px 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+#windows-event-analysis .win-event-recurring h3 { font-size: .95rem; margin: 0 0 8px; }
+#windows-event-analysis .win-event-top { margin: 0; padding-left: 22px; font-size: .88rem; overflow-wrap: anywhere; }
+#windows-event-analysis .win-event-top li { margin: 4px 0; }
+
+/* 각 이벤트의 상세 내역은 선택한 행 바로 아래에서 열린다. */
+#windows-event-analysis .win-event-detail-row > td {
+  padding: 10px 8px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+#windows-event-analysis .win-event-detail-row .win-event-detail { margin: 0; }

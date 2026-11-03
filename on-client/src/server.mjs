@@ -23,13 +23,14 @@ import {createNativeHostContext,captureNativeHostConfiguration,readNativeHostCon
 import {APPEARANCE_IMAGES,appearanceCss,appearanceView} from './student-appearance.mjs';
 import {readStudentAppearance} from './student-appearance-files.mjs';
 import {readPcStatus} from './pc-status.mjs';
+import {readWindowsEventDetails} from './windows-event-details.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(value);
 const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const text=value=>typeof value==='string'&&value.length<=2000;
 const files=new Map([['/','public/index.html'],['/index.html','public/index.html'],['/app.js','public/app.js'],['/style.css','public/style.css'],['/vulnerabilities-view.mjs','public/vulnerabilities-view.mjs'],['/student/extension.mjs','student/extension.mjs'],
-  ['/ai-connect.mjs','public/ai-connect.mjs'],['/student-appearance.mjs','public/student-appearance.mjs'],['/pc-status-view.mjs','public/pc-status-view.mjs'],
+  ['/windows-events-view.mjs','public/windows-events-view.mjs'],['/ai-connect.mjs','public/ai-connect.mjs'],['/student-appearance.mjs','public/student-appearance.mjs'],['/pc-status-view.mjs','public/pc-status-view.mjs'],
   ...['alekov-ai-explain','alekov-app-icon','alekov-connect-approval','alekov-connection-unknown','alekov-empty-records'].map(name=>[`/assets/alekov/${name}.webp`,`public/assets/alekov/${name}.webp`])]);
 const connectionRoutes=new Map(['start','finish','status','cancel'].map(kind=>[`/api/ai/connect/${kind}`,kind]));
 // 학생 꾸밈 고정 route: 정규화 DTO, 검증된 색 변수 CSS, 꾸밈이 고른 허용 그림만. student 폴더 목록·임의 파일 제공은 없다.
@@ -443,6 +444,12 @@ export function createOnServer(serverOptions={}) {
         if(req.method!=='GET'){send(405,{ok:false,error:{code:'METHOD_NOT_ALLOWED',message:'조회만 지원합니다.',retryable:false}});return;}
         if(req.headers.origin!==undefined&&req.headers.origin!==`http://${host}`)throw engineError('ORIGIN_REJECTED','',403);
         const data=await bounded(signal=>readPcStatus({signal,directory:assetsRoot}));
+        send(200,{ok:true,data});return;
+      }
+      if(url.pathname==='/api/pc/events'){
+        if(req.method!=='GET'){send(405,{ok:false,error:{code:'METHOD_NOT_ALLOWED',message:'조회만 지원합니다.',retryable:false}});return;}
+        if(req.headers.origin!==undefined&&req.headers.origin!==`http://${host}`)throw engineError('ORIGIN_REJECTED','',403);
+        const data=await bounded(signal=>readWindowsEventDetails({signal}));
         send(200,{ok:true,data});return;
       }
       if(url.pathname.startsWith('/api/native-login/')){
