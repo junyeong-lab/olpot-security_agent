@@ -43,6 +43,8 @@ test('직원용 요약과 기존 전체 화면이 함께 표시된다', () => {
   assert.doesNotMatch(html,/id="tech-view-toggle"/);
   assert.doesNotMatch(css,/body:not\(\.show-tech\) \.card\.student/);
   const view=readFileSync(new URL('../public/pc-status-view.mjs',import.meta.url),'utf8');
-  assert.match(view,/PC 상세 상태/);
-  assert.doesNotMatch(view,/createElement\('details'\)/);
+  assert.match(view,/createElement\('details'\)/);
+  assert.match(view,/상세 PC 정보 보기/);
+  assert.match(view,/details\.append\(grid\)/);
+  assert.doesNotMatch(view,/details\.open\s*=\s*true/);
 });
