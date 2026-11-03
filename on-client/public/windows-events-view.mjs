@@ -115,17 +115,17 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
   head.append(header);
   const body=make('tbody');
   table.append(head,body);tableWrap.append(table);
-  const details=make('section','','win-event-detail');
-  details.setAttribute('aria-label','선택한 이벤트 세부 정보');
-  details.append(make('p','행의 「상세」를 누르면 해당 이벤트의 메타데이터가 표시됩니다.','muted'));
   const notice=make('p','이벤트 수준이 오류라도 침해 사고나 악성 행위로 단정할 수 없습니다. 원인 분석에는 관련 시스템 맥락을 추가 확인해야 합니다.','muted');
-  panel.append(filters,counters,recurring,tableWrap,details,notice);
+  panel.append(filters,counters,recurring,tableWrap,notice);
   host.replaceChildren(heading,intro,toolbar,status,panel);
   let data=null, selected=null, controller=null, generation=0, disposed=false;
 
   const rowKey=row=>row.channel+':'+row.recordId;
   function detail(row) {
-    details.replaceChildren(make('h3','선택한 이벤트 · '+row.eventId));
+    const details=make('section','','win-event-detail');
+    details.id='win-event-selected-detail';
+    details.setAttribute('aria-label','선택한 이벤트 세부 정보');
+    details.append(make('h3','선택한 이벤트 · '+row.eventId));
     const dl=make('dl','','win-event-kv');
     for (const [name,value] of [
       ['발생 시각',new Date(row.time).toLocaleString('ko-KR')],
@@ -134,6 +134,7 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
       dl.append(make('dt',name),make('dd',value));
     }
     details.append(dl,make('p','이 화면은 Windows 이벤트 메시지 원문·계정·네트워크 주소를 저장하지 않습니다.','muted'));
+    return details;
   }
   function render() {
     if (!data) return;
@@ -155,7 +156,6 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
     if (events.length===0) {
       const tr=make('tr'),td=make('td','조건에 맞는 이벤트가 없습니다.');td.colSpan=6;
       tr.append(td);body.append(tr);
-      details.replaceChildren(make('p','선택할 이벤트가 없습니다.','muted'));
       return;
     }
     if (!events.some(e=>rowKey(e)===selected)) selected=null;
@@ -168,15 +168,30 @@ export function mountWindowsEventAnalysis(host,{fetchImpl = globalThis.fetch?.bi
       const last=make('td'),button=make('button','상세','btn win-event-detail-btn');
       button.type='button';
       button.setAttribute('aria-label','이벤트 '+row.eventId+' 상세 보기');
-      button.setAttribute('aria-pressed',rowKey(row)===selected?'true':'false');
+      const key=rowKey(row);
+      button.dataset.eventKey=key;
+      button.setAttribute('aria-expanded',selected===key?'true':'false');
+      if(selected===key)button.setAttribute('aria-controls','win-event-selected-detail');
       button.addEventListener('click',()=>{
-        selected=rowKey(row);
-        detail(row);
+        selected=selected===key?null:key;
         render();
+        // 목록 맨 아래가 아니라 해당 행 바로 아래에 상세를 열고 화면 안으로 이동한다.
+        const replacement=[...body.querySelectorAll('.win-event-detail-btn')]
+          .find(item=>item.dataset.eventKey===key);
+        replacement?.focus({preventScroll:true});
+        if(selected)body.querySelector('.win-event-detail-row')
+          ?.scrollIntoView?.({block:'nearest',behavior:'auto'});
       });
       last.append(button);tr.append(last);body.append(tr);
+      if(selected===key){
+        const detailRow=make('tr','','win-event-detail-row');
+        const detailCell=make('td');
+        detailCell.colSpan=6;
+        detailCell.append(detail(row));
+        detailRow.append(detailCell);
+        body.append(detailRow);
+      }
     }
-    if (!selected) details.replaceChildren(make('p','행의 「상세」를 누르면 이벤트 정보가 표시됩니다.','muted'));
   }
   function clear() {
     data=null;selected=null;panel.hidden=true;exportBtn.disabled=true;
