@@ -100,8 +100,10 @@ export function mountPcStatus(host, {fetchImpl = globalThis.fetch?.bind(globalTh
     article.append(label,value,note); summaryGrid.append(article);
     summaryRows.set(key,{article,value,note});
   }
-  const details=make('section','','pc-details');
-  details.append(make('h3','PC 상세 상태'));
+  // 평소에는 직원용 요약만 표시하고, 요청할 때 같은 카드 안에서 전체 진단을 펼친다.
+  const details=doc.createElement('details');
+  details.className='pc-details';
+  details.append(make('summary','상세 PC 정보 보기'));
   const grid = make('div', '', 'pc-metrics');
   const rows = new Map();
   for (const [key, title] of Object.entries({cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', firewall: 'Windows 방화벽', events: 'Windows 기록', vpn: 'Windows VPN', antivirus: 'Microsoft Defender', avProducts: '등록된 백신', signins: 'Windows 로그인 기록'})) {
