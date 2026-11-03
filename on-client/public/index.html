@@ -9,7 +9,6 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/student/appearance.css">
   <script type="module" src="/app.js"></script>
-  <script type="module" src="/employee-view.mjs"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -35,11 +34,6 @@
         <button type="button" role="tab" id="tab-records" data-testid="nav-records" data-view="records" aria-controls="view-records" aria-selected="false" tabindex="-1">보안 기록</button>
       </div>
       <p class="sidebar-note">메뉴는 위·아래 방향키로 이동할 수 있습니다.</p>
-      <details class="sidebar-dev">
-        <summary>개발자 옵션</summary>
-        <button id="tech-view-toggle" type="button" class="btn" aria-pressed="false">진단·실습 화면 보기</button>
-        <p class="muted">화면 표시만 변경합니다. 관리자 권한을 부여하지 않습니다.</p>
-      </details>
     </nav>
 
     <main id="main" tabindex="-1">
@@ -58,12 +52,12 @@
         <section id="local-pc-notice" class="card provided local-pc-notice" data-testid="local-pc-notice" aria-labelledby="local-pc-notice-title" tabindex="-1" hidden>
           <h2 id="local-pc-notice-title">회사 연결 안내 <span class="tag">PC 전용 모드</span></h2>
           <p class="local-pc-lead">현재 실행에서는 회사 서버와의 연결을 확인할 수 없습니다. 내 PC 조회는 가능하지만 업무 시스템 접근이 허용된 상태는 아닙니다.</p>
-          <ol class="connect-steps tech-only">
+          <ol class="connect-steps">
             <li>위쪽 「내 PC 확인」을 눌러 CPU·메모리·디스크·네트워크·Windows 방화벽·Windows 기록과 Windows VPN·Defender·등록 백신 제품·로그인 이벤트 요약을 읽습니다. 타사 VPN 연결 상태와 백신 실제 보호 상태는 별도 확인이 필요합니다.</li>
             <li>계속 지켜보려면 「10초마다 확인」을 켭니다. 앱 탭이 보이는 동안에만 확인합니다.</li>
             <li>로그인·업무 앱·보안 기록·AI 연결이 필요한 작업은 담당자가 안내한 연결 실행으로 앱을 다시 열어 진행합니다. 이 화면에서는 연결을 시작하지 않습니다.</li>
           </ol>
-          <p class="muted tech-only">이 안내는 서버가 알려 준 실행 형태를 화면에 옮긴 것입니다. 권한·연결 성공·안전·통과 판정이 아니며, 제공 UI라서 학생 성취로 계산하지 않습니다. 그래서 AI 연결 절차와 AI 연결 점검 카드는 이 실행에서 접어 두었습니다.</p>
+          <p class="muted">이 안내는 서버가 알려 준 실행 형태를 화면에 옮긴 것입니다. 권한·연결 성공·안전·통과 판정이 아니며, 제공 UI라서 학생 성취로 계산하지 않습니다. 그래서 AI 연결 절차와 AI 연결 점검 카드는 이 실행에서 접어 두었습니다.</p>
         </section>
         <figure id="start-picture" class="start-picture" hidden>
           <img id="start-picture-image" class="start-picture-image" alt="" aria-hidden="true" draggable="false" decoding="async">
@@ -101,7 +95,7 @@
           <div id="student-status" class="student-slot" aria-live="polite"></div>
         </section>
 
-        <section class="card provided tech-only" aria-labelledby="diag-title">
+        <section class="card provided" aria-labelledby="diag-title">
           <h2 id="diag-title">도움정보 <span class="tag">제공</span></h2>
           <p class="muted">서버의 비밀 없는 연결 점검 결과를 불러와 직접 확인한 뒤 복사할 수 있습니다. 자동으로 전송하지 않습니다.</p>
           <div class="row">
@@ -112,7 +106,7 @@
           <pre id="diag-output" class="diag-output" tabindex="0" hidden></pre>
         </section>
 
-        <section id="ai-connect-card" class="card provided tech-only" aria-labelledby="ai-connect-title" data-testid="ai-connect-card">
+        <section id="ai-connect-card" class="card provided" aria-labelledby="ai-connect-title" data-testid="ai-connect-card">
           <h2 id="ai-connect-title">AI 연결 <span class="tag">제공 · 17단계 연결 절차</span></h2>
           <div class="connect-layout">
             <div class="connect-body">
@@ -165,7 +159,7 @@
           </div>
         </section>
 
-        <section id="ai-connection-card" class="card provided tech-only" aria-labelledby="ai-connection-title">
+        <section id="ai-connection-card" class="card provided" aria-labelledby="ai-connection-title">
           <h2 id="ai-connection-title">AI 연결 점검 <span class="tag">제공</span></h2>
           <p class="muted">현재 로그인과 앱 권한으로 모델 응답을 점검합니다. 설정값 존재·모델 목록 응답은 사건 설명의 성공과 별도로 확인합니다. 브라우저에서 열쇠를 입력하거나 복사하지 않습니다.</p>
           <div class="row">
@@ -179,7 +173,7 @@
           <div id="student-ai-connection" class="student-slot" aria-live="polite"></div>
         </section>
 
-        <section class="card provided tech-only" aria-labelledby="vulnerabilities-title">
+        <section class="card provided" aria-labelledby="vulnerabilities-title">
           <h2 id="vulnerabilities-title">설치 패키지와 취약점 정보 <span class="tag">제공 · OSV</span></h2>
           <p class="muted">서버에 연결한 프로젝트의 공개 조회 승인 패키지만 정확한 설치 버전으로 대조합니다. 조회 실패와 미조회는 알려진 항목 없음이 아닙니다.</p>
           <div class="row">
@@ -235,7 +229,7 @@
           <button type="button" id="ai-explanation-cancel" class="btn" disabled>AI 설명 취소</button>
           <div id="student-explanation" class="student-slot" aria-live="polite"></div>
         </section>
-        <section class="card provided tech-only" aria-labelledby="action-title">
+        <section class="card provided" aria-labelledby="action-title">
           <h2 id="action-title">조치 준비와 원천 결과 <span class="tag">제공</span></h2>
           <p class="muted">현재 선택한 사건의 AI 제안에서 조치를 직접 준비합니다. 사건·실제 대상·확인 기한을 읽은 뒤 사람 확인 버튼을 누르세요. ACK·취소·시간 초과는 효과 없음이나 완료가 아닙니다.</p>
           <div id="action-result" data-state="idle" aria-live="polite"></div>
