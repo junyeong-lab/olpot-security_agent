@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {validateWindowsEventResponse, filterWindowsEvents, windowsEventsCsv}
+import {validateWindowsEventResponse, filterWindowsEvents, windowsEventsCsv, recurringWindowsEvents}
   from '../public/windows-events-view.mjs';
 
 const measuredAt='2026-11-03T14:00:00.000Z';
@@ -39,11 +39,18 @@ test('검색, 수준, 채널 필터는 실제 로그 제공자 및 ID에 적용�
 });
 
 test('CSV 내보내기는 스프레드시트 수식 실행을 피하고 BOM과 줄바꿈을 제공한다',()=>{
-  const csv=windowsEventsCsv([row2]);
+  const csv=windowsEventsCsv([row2,{...row1,provider:'quoted"provider'}]);
   assert.ok(csv.startsWith('\uFEFF'));
   assert.match(csv,/""/);
   assert.match(csv,/"'\+cmd"/);
   assert.ok(csv.endsWith('\r\n'));
+});
+
+test('반복 이벤트 TOP 목록은 조회 표본 내 제공자·ID별 발생 횟수만 세어 표시한다',()=>{
+  const input=[row1,row2,{...row1,recordId:'1009'},{...row1,recordId:'1010'}];
+  const top=recurringWindowsEvents(input);
+  assert.equal(top.length,2);
+  assert.deepEqual({id:top[0].eventId,count:top[0].count},{id:1552,count:3});
 });
 
 test('기존 보안 기록 및 과제 화면을 유지하고 별도의 로컬 이벤트 카드만 추가한다',()=>{
