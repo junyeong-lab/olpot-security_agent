@@ -100,7 +100,8 @@ export function createWindowsEventDetailsReader({platform = os.platform(), run =
       details = unavailable(reason);
     }
     signal?.throwIfAborted();
-    return {schema:'aleph.on.windows-events.v1', source:'local-pc', measuredAt, ...details};
+    // 정규화 결과의 source(windows-event-log)가 API의 source(local-pc)를 덮지 않도록 마지막에 지정한다.
+    return {schema:'aleph.on.windows-events.v1', measuredAt, ...details, source:'local-pc'};
   };
 }
 
