@@ -31,15 +31,18 @@ test('확인되지 않은 항목은 직원 화면에서 정상으로 표시하�
   assert.equal(mixed.storage.state,'attention');
 });
 
-test('직원 화면 기본 구성과 개발용 분리 표시가 유지된다', () => {
+test('직원용 요약과 기존 전체 화면이 함께 표시된다', () => {
   const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
   assert.match(html,/id="pc-status"/);
   assert.match(html,/id="view-apps"/);
-  assert.match(html,/id="tech-view-toggle"/);
-  assert.match(html,/employee-view\.mjs/);
-  assert.match(css,/body:not\(\.show-tech\) \.tech-only/);
-  assert.match(css,/body:not\(\.show-tech\) \.card\.student/);
+  assert.match(html,/id="student-identity"/);
+  assert.match(html,/id="ai-connect-card"/);
+  assert.match(html,/id="vulnerabilities-result"/);
+  assert.match(html,/id="view-records"/);
+  assert.doesNotMatch(html,/id="tech-view-toggle"/);
+  assert.doesNotMatch(css,/body:not\(\.show-tech\) \.card\.student/);
   const view=readFileSync(new URL('../public/pc-status-view.mjs',import.meta.url),'utf8');
-  assert.match(view,/상세 PC 진단 보기/);
+  assert.match(view,/PC 상세 상태/);
+  assert.doesNotMatch(view,/createElement\('details'\)/);
 });
