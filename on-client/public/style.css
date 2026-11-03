@@ -305,3 +305,8 @@ main:focus { outline: none; }
 #windows-event-analysis .win-event-kv dt { color: var(--muted); }
 #windows-event-analysis .win-event-kv dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: .9rem; }
 @media(max-width:600px) { #windows-event-analysis .win-event-kv { grid-template-columns: 1fr; } }
+
+#windows-event-analysis .win-event-recurring { margin: 14px 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+#windows-event-analysis .win-event-recurring h3 { font-size: .95rem; margin: 0 0 8px; }
+#windows-event-analysis .win-event-top { margin: 0; padding-left: 22px; font-size: .88rem; overflow-wrap: anywhere; }
+#windows-event-analysis .win-event-top li { margin: 4px 0; }
